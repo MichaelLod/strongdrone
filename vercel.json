@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "export HOME=/tmp CARGO_HOME=/tmp/c RUSTUP_HOME=/tmp/r PATH=/tmp/c/bin:$PATH && curl -sSf https://sh.rustup.rs|sh -s -- -y --no-modify-path -t wasm32-unknown-unknown && curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh|sh && pnpm -w build",
   "installCommand": "pnpm install --frozen-lockfile",
-  "outputDirectory": "apps/web/dist",
+  "outputDirectory": "dist",
   "framework": null
 }
