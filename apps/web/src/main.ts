@@ -88,6 +88,7 @@ async function main() {
   let personalBest: number | null = getPersonalBest(scenario.getDefinition().id);
   let runCount = countRunsFor(scenario.getDefinition().id);
   let lastShareableRun: RunRecord | null = null;
+  let engaged = false;
 
   sim.setOnDecision((event) => {
     actionLog.push(event);
@@ -103,6 +104,21 @@ async function main() {
     runStartedAt = Date.now();
     prevStatus = 'running';
     lastBanner = null;
+    engaged = false;
+  }
+
+  function startRun() {
+    if (mode === 'replay') return;
+    resetRun();
+    runStartedAt = Date.now();
+    engaged = true;
+    updateUi();
+  }
+
+  function stopRun() {
+    if (mode === 'replay') return;
+    engaged = false;
+    updateUi();
   }
 
   function switchScenario(id: string) {
@@ -143,6 +159,7 @@ async function main() {
     saveRun(run);
     runCount += 1;
     lastShareableRun = run;
+    engaged = false;
 
     if (sc.status === 'success' && sc.score !== null) {
       const { isNewBest, previousBest } = maybeUpdatePB(scenarioId, sc.score);
@@ -168,6 +185,8 @@ async function main() {
   const modeBadge = document.getElementById('mode-badge') as HTMLDivElement;
   const replayLastBtn = document.getElementById('replay-last') as HTMLButtonElement;
   const stopReplayBtn = document.getElementById('stop-replay') as HTMLButtonElement;
+  const startBtn = document.getElementById('start-btn') as HTMLButtonElement;
+  const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
   const pilotSection = document.getElementById('pilot-section') as HTMLDivElement;
   const runSection = document.getElementById('run-section') as HTMLDivElement;
   const aiSection = document.getElementById('ai-section') as HTMLDivElement;
@@ -219,6 +238,7 @@ async function main() {
     sim.setAgent(createReplayAgent(record.actionLog));
     sim.setActionPhaseDuration(record.actionPhaseDuration ?? LLM_PHASE);
     mode = 'replay';
+    engaged = true;
     lastBanner = `REPLAY  ${record.scenarioId} · ${record.agentMode}${record.model ? ' · ' + record.model : ''} · ${record.durationSimTime.toFixed(2)}s`;
     updateUi();
   }
@@ -243,17 +263,22 @@ async function main() {
     toggleBtn.classList.toggle('pilot-on', mode === 'llm');
     toggleBtn.hidden = mode === 'replay' || !llmAgent;
 
-    stopReplayBtn.hidden = mode !== 'replay';
-    replayLastBtn.hidden = mode === 'replay' || !lastShareableRun;
-    shareBtn.hidden = mode === 'replay' || !lastShareableRun;
+    const isReplay = mode === 'replay';
+    startBtn.hidden = isReplay || engaged;
+    stopBtn.hidden = isReplay || !engaged;
+    stopReplayBtn.hidden = !isReplay;
+    replayLastBtn.hidden = isReplay || engaged || !lastShareableRun;
+    shareBtn.hidden = isReplay || engaged || !lastShareableRun;
     if (lastShareableRun) {
       shareBtn.textContent = 'Copy Last Run';
       shareBtn.disabled = false;
     }
 
+    toggleBtn.disabled = engaged;
+
     aiSection.hidden = !llmAgent;
     pilotSection.hidden = !!toggleBtn.hidden;
-    runSection.hidden = replayLastBtn.hidden && stopReplayBtn.hidden && shareBtn.hidden;
+    runSection.hidden = false;
   }
 
   async function populateModels(s: ByokySession) {
@@ -366,6 +391,8 @@ async function main() {
   });
 
   toggleBtn.addEventListener('click', () => setMode(mode === 'llm' ? 'keyboard' : 'llm'));
+  startBtn.addEventListener('click', startRun);
+  stopBtn.addEventListener('click', stopRun);
 
   replayLastBtn.addEventListener('click', () => {
     if (lastShareableRun) startReplay(lastShareableRun);
@@ -410,14 +437,14 @@ async function main() {
     last = now;
     acc = Math.min(acc + dt, fixedDtMs);
 
-    if (prevStatus === 'running' && !stepping) {
+    if (engaged && prevStatus === 'running' && !stepping) {
       stepping = true;
       while (acc >= fixedDtMs) {
         await sim.step();
         acc -= fixedDtMs;
       }
       stepping = false;
-    } else if (prevStatus !== 'running') {
+    } else {
       acc = 0;
     }
 
