@@ -10,9 +10,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
-    "@byoky/sdk": "0.9.2",
-    "three": "^0.170.0"
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/openai": "^3.0.53",
+    "@byoky/sdk": "0.9.3",
+    "ai": "^6.0.168",
+    "three": "^0.170.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/three": "^0.184.0",

@@ -1,4 +1,4 @@
-import { Byoky, type ByokySession } from '@byoky/sdk';
+import { Byoky, getProvider, getProviderIds, type ByokySession } from '@byoky/sdk';
 import { buildGates, createScene, disposeGates, updateGates, type GateRefs } from './scene';
 import { createSim } from './sim';
 import { createKeyboardAgent } from './agents/keyboard';
@@ -25,9 +25,25 @@ import type { Action, Agent, Observation } from './types';
 const PHYSICS_TIMESTEP = 1 / 60;
 const KEYBOARD_PHASE = 0.05;
 const LLM_PHASE = 0.5;
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
-const MODEL_KEY = 'strongdrone:model';
+const DEFAULT_MODEL = 'anthropic:claude-sonnet-4-6';
+const MODEL_KEY = 'strongdrone:model-v2';
 const RECENT_DECISIONS_MAX = 6;
+const SUPPORTED_PROVIDERS = new Set([
+  'anthropic',
+  'openai',
+  'gemini',
+  'groq',
+  'perplexity',
+  'together',
+  'fireworks',
+  'deepseek',
+  'xai',
+  'openrouter',
+  'mistral',
+  'azure_openai',
+  'ollama',
+  'lm_studio',
+]);
 
 type Mode = 'keyboard' | 'llm' | 'replay';
 
@@ -171,8 +187,9 @@ async function main() {
     selectedModel = modelPicker.value;
     localStorage.setItem(MODEL_KEY, selectedModel);
     if (session) {
-      llmAgent = createLlmAgent({ session, model: selectedModel });
-      statusEl.textContent = `${selectedModel} via byoky`;
+      const { providerId, modelId } = parseModelKey(selectedModel);
+      llmAgent = createLlmAgent({ session, providerId, modelId });
+      statusEl.textContent = `${modelId} via ${getProvider(providerId)?.name ?? providerId}`;
       if (mode === 'llm') sim.setAgent(llmAgent);
     }
   });
@@ -242,42 +259,79 @@ async function main() {
   async function populateModels(s: ByokySession) {
     modelPicker.innerHTML = '<option>Loading models…</option>';
     modelPicker.disabled = true;
-    try {
-      const models = await s.listModels('anthropic');
-      modelPicker.innerHTML = '';
-      if (!models.length) throw new Error('empty model list');
-      for (const m of models) {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.displayName || m.id;
-        modelPicker.appendChild(opt);
-      }
-      if (!models.some((m) => m.id === selectedModel)) {
-        selectedModel = models[0].id;
-        localStorage.setItem(MODEL_KEY, selectedModel);
-        llmAgent = createLlmAgent({ session: s, model: selectedModel });
-        if (mode === 'llm') sim.setAgent(llmAgent);
-      }
-      modelPicker.value = selectedModel;
-      statusEl.textContent = `${selectedModel} via byoky`;
-    } catch (err) {
-      console.error('listModels failed:', err);
-      modelPicker.innerHTML = '';
+    const available = getProviderIds().filter(
+      (id) => SUPPORTED_PROVIDERS.has(id) && s.providers[id]?.available === true
+    );
+
+    type Entry = { providerId: string; providerName: string; modelId: string; displayName: string };
+    const entries: Entry[] = [];
+    await Promise.all(
+      available.map(async (pid) => {
+        try {
+          const list = await s.listModels(pid);
+          const name = getProvider(pid)?.name ?? pid;
+          for (const m of list) {
+            entries.push({
+              providerId: pid,
+              providerName: name,
+              modelId: m.id,
+              displayName: m.displayName || m.id,
+            });
+          }
+        } catch (err) {
+          console.warn(`listModels(${pid}) failed:`, err);
+        }
+      })
+    );
+
+    modelPicker.innerHTML = '';
+    if (!entries.length) {
       const opt = document.createElement('option');
-      opt.value = selectedModel;
-      opt.textContent = selectedModel;
+      opt.textContent = 'No keys available — add one in your byoky wallet';
+      opt.disabled = true;
+      opt.selected = true;
       modelPicker.appendChild(opt);
-      modelPicker.value = selectedModel;
-    } finally {
-      modelPicker.disabled = false;
+      modelPicker.disabled = true;
+      return;
     }
+
+    const byProvider = new Map<string, Entry[]>();
+    for (const e of entries) {
+      if (!byProvider.has(e.providerId)) byProvider.set(e.providerId, []);
+      byProvider.get(e.providerId)!.push(e);
+    }
+    for (const [pid, list] of byProvider) {
+      const group = document.createElement('optgroup');
+      group.label = list[0].providerName;
+      for (const e of list) {
+        const opt = document.createElement('option');
+        opt.value = `${pid}:${e.modelId}`;
+        opt.textContent = e.displayName;
+        group.appendChild(opt);
+      }
+      modelPicker.appendChild(group);
+    }
+
+    const allKeys = entries.map((e) => `${e.providerId}:${e.modelId}`);
+    if (!allKeys.includes(selectedModel)) {
+      selectedModel = allKeys[0];
+      localStorage.setItem(MODEL_KEY, selectedModel);
+    }
+    modelPicker.value = selectedModel;
+    modelPicker.disabled = false;
+
+    const { providerId, modelId } = parseModelKey(selectedModel);
+    llmAgent = createLlmAgent({ session: s, providerId, modelId });
+    statusEl.textContent = `${modelId} via ${getProvider(providerId)?.name ?? providerId}`;
+    if (mode === 'llm') sim.setAgent(llmAgent);
   }
 
   function showConnected(s: ByokySession) {
     session = s;
-    llmAgent = createLlmAgent({ session: s, model: selectedModel });
+    const { providerId, modelId } = parseModelKey(selectedModel);
+    llmAgent = createLlmAgent({ session: s, providerId, modelId });
     connectBtn.hidden = true;
-    statusEl.textContent = `${selectedModel} via byoky`;
+    statusEl.textContent = `${modelId} via ${getProvider(providerId)?.name ?? providerId}`;
     setMode('llm');
     populateModels(s);
 
@@ -299,7 +353,7 @@ async function main() {
     connectBtn.textContent = 'Connecting…';
     try {
       const s = await byoky.connect({
-        providers: [{ id: 'anthropic', required: true }],
+        providers: [...SUPPORTED_PROVIDERS].map((id) => ({ id, required: false })),
         modal: true,
       });
       showConnected(s);
@@ -403,6 +457,12 @@ async function main() {
 
 function countRunsFor(scenarioId: string): number {
   return loadRuns().filter((r) => r.scenarioId === scenarioId).length;
+}
+
+function parseModelKey(key: string): { providerId: string; modelId: string } {
+  const i = key.indexOf(':');
+  if (i < 0) return { providerId: 'anthropic', modelId: key };
+  return { providerId: key.slice(0, i), modelId: key.slice(i + 1) };
 }
 
 type HudExtras = {

@@ -1,4 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText, tool, type LanguageModel } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { z } from 'zod';
 import type { ByokySession } from '@byoky/sdk';
 import type { Action, Agent, AgentContext } from '../types';
 
@@ -15,83 +19,91 @@ Strategy:
 - Autopilot top speed is 5 m/s.
 - Do not narrate. Tool call only.`;
 
-const TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'velocity',
+const TOOLS = {
+  velocity: tool({
     description: 'Fly at a constant velocity vector in the world frame (m/s).',
-    input_schema: {
-      type: 'object',
-      properties: {
-        vx: { type: 'number', description: 'east velocity' },
-        vy: { type: 'number', description: 'up velocity' },
-        vz: { type: 'number', description: 'south velocity' },
-      },
-      required: ['vx', 'vy', 'vz'],
-    },
-  },
-  {
-    name: 'goto',
+    inputSchema: z.object({
+      vx: z.number().describe('east velocity'),
+      vy: z.number().describe('up velocity'),
+      vz: z.number().describe('south velocity'),
+    }),
+  }),
+  goto: tool({
     description: 'Fly toward an absolute world position. Autopilot caps speed at 5 m/s.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        x: { type: 'number' },
-        y: { type: 'number' },
-        z: { type: 'number' },
-      },
-      required: ['x', 'y', 'z'],
-    },
-  },
-  {
-    name: 'hover',
+    inputSchema: z.object({
+      x: z.number(),
+      y: z.number(),
+      z: z.number(),
+    }),
+  }),
+  hover: tool({
     description: 'Maintain current position.',
-    input_schema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'land',
+    inputSchema: z.object({}),
+  }),
+  land: tool({
     description: 'Slowly descend.',
-    input_schema: { type: 'object', properties: {} },
-  },
-];
+    inputSchema: z.object({}),
+  }),
+};
 
 export type LlmAgentOptions = {
   session: ByokySession;
-  model?: string;
+  providerId: string;
+  modelId: string;
 };
 
-export function createLlmAgent({ session, model = 'claude-sonnet-4-6' }: LlmAgentOptions): Agent {
-  const client = new Anthropic({
-    apiKey: session.sessionKey,
-    fetch: session.createFetch('anthropic'),
-    dangerouslyAllowBrowser: true,
-  });
+export function createLlmAgent({ session, providerId, modelId }: LlmAgentOptions): Agent {
+  const model = buildModel(session, providerId, modelId);
 
   return {
     async decide(ctx: AgentContext): Promise<Action> {
       try {
-        const response = await client.messages.create({
+        const result = await generateText({
           model,
-          max_tokens: 256,
           system: SYSTEM_PROMPT,
+          prompt: buildUserMessage(ctx),
           tools: TOOLS,
-          tool_choice: { type: 'any' },
-          messages: [{ role: 'user', content: buildUserMessage(ctx) }],
+          toolChoice: 'required',
+          maxOutputTokens: 256,
         });
 
-        const toolUse = response.content.find(
-          (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
-        );
-        if (!toolUse) {
-          console.warn('LLM returned no tool use; hovering. content:', response.content);
+        const call = result.toolCalls[0];
+        if (!call) {
+          console.warn('LLM returned no tool call; hovering. text:', result.text);
           return { type: 'hover' };
         }
-        return parseAction(toolUse);
+        return parseAction(call.toolName, call.input as Record<string, unknown>);
       } catch (err) {
         console.error('LLM decide failed:', err);
         return { type: 'hover' };
       }
     },
   };
+}
+
+function buildModel(session: ByokySession, providerId: string, modelId: string): LanguageModel {
+  const fetch = session.createFetch(providerId);
+  switch (providerId) {
+    case 'anthropic':
+      return createAnthropic({ apiKey: session.sessionKey, fetch })(modelId);
+    case 'openai':
+    case 'groq':
+    case 'perplexity':
+    case 'together':
+    case 'fireworks':
+    case 'deepseek':
+    case 'xai':
+    case 'openrouter':
+    case 'mistral':
+    case 'azure_openai':
+    case 'ollama':
+    case 'lm_studio':
+      return createOpenAI({ apiKey: session.sessionKey, fetch })(modelId);
+    case 'gemini':
+      return createGoogleGenerativeAI({ apiKey: session.sessionKey, fetch })(modelId);
+    default:
+      throw new Error(`Provider "${providerId}" is not supported by the AI SDK adapter yet.`);
+  }
 }
 
 function buildUserMessage(ctx: AgentContext): string {
@@ -118,11 +130,9 @@ function buildUserMessage(ctx: AgentContext): string {
   ].join('\n');
 }
 
-function parseAction(toolUse: Anthropic.ToolUseBlock): Action {
-  const input = toolUse.input as Record<string, unknown>;
-  const num = (k: string) => (typeof input[k] === 'number' ? (input[k] as number) : 0);
-
-  switch (toolUse.name) {
+function parseAction(toolName: string, args: Record<string, unknown>): Action {
+  const num = (k: string) => (typeof args[k] === 'number' ? (args[k] as number) : 0);
+  switch (toolName) {
     case 'velocity':
       return { type: 'velocity', v: { x: num('vx'), y: num('vy'), z: num('vz') } };
     case 'goto':
@@ -132,7 +142,7 @@ function parseAction(toolUse: Anthropic.ToolUseBlock): Action {
     case 'land':
       return { type: 'land' };
     default:
-      console.warn('Unknown tool:', toolUse.name);
+      console.warn('Unknown tool:', toolName);
       return { type: 'hover' };
   }
 }
