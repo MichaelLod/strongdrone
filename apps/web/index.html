@@ -92,10 +92,53 @@
         0%, 100% { opacity: 1; }
         50% { opacity: 0.3; }
       }
+      #connect-ai {
+        position: fixed;
+        top: 18px; left: 50%;
+        transform: translateX(-50%);
+        background: #FF4F00;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 14px 26px;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        cursor: pointer;
+        box-shadow: 0 4px 14px rgba(255, 79, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.2);
+        transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+        z-index: 100;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #connect-ai:hover {
+        background: #ff6420;
+        transform: translateX(-50%) translateY(-2px);
+        box-shadow: 0 8px 22px rgba(255, 79, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+      #connect-ai:active {
+        transform: translateX(-50%) translateY(0);
+      }
+      #connect-ai:disabled {
+        opacity: 0.75; cursor: default;
+        transform: translateX(-50%);
+      }
+      #connect-ai .byoky-dot {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+      }
     </style>
   </head>
   <body>
     <div id="hud">loading…</div>
+
+    <button id="connect-ai"><span class="byoky-dot"></span>Connect AI with Byoky</button>
+
     <div id="ai-panel">
       <div id="mode-badge" class="mode-keyboard">KEYBOARD</div>
 
@@ -104,11 +147,10 @@
         <select id="scenario-picker"></select>
       </div>
 
-      <div class="panel-section" id="ai-section">
+      <div class="panel-section" id="ai-section" hidden>
         <div class="panel-label">AI Provider</div>
-        <button id="connect-ai">Connect AI</button>
-        <select id="model-picker" hidden></select>
-        <div id="ai-status" class="status" hidden></div>
+        <select id="model-picker"></select>
+        <div id="ai-status" class="status"></div>
       </div>
 
       <div class="panel-section" id="pilot-section" hidden>

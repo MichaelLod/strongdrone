@@ -140,6 +140,7 @@ async function main() {
   const stopReplayBtn = document.getElementById('stop-replay') as HTMLButtonElement;
   const pilotSection = document.getElementById('pilot-section') as HTMLDivElement;
   const runSection = document.getElementById('run-section') as HTMLDivElement;
+  const aiSection = document.getElementById('ai-section') as HTMLDivElement;
   const byoky = new Byoky();
 
   for (const def of SCENARIOS) {
@@ -218,6 +219,7 @@ async function main() {
       shareBtn.disabled = false;
     }
 
+    aiSection.hidden = !llmAgent;
     pilotSection.hidden = !!toggleBtn.hidden;
     runSection.hidden = replayLastBtn.hidden && stopReplayBtn.hidden && shareBtn.hidden;
   }
@@ -260,8 +262,6 @@ async function main() {
     session = s;
     llmAgent = createLlmAgent({ session: s, model: selectedModel });
     connectBtn.hidden = true;
-    modelPicker.hidden = false;
-    statusEl.hidden = false;
     statusEl.textContent = `${selectedModel} via byoky`;
     setMode('llm');
     populateModels(s);
@@ -270,8 +270,6 @@ async function main() {
       session = null;
       llmAgent = null;
       connectBtn.hidden = false;
-      modelPicker.hidden = true;
-      statusEl.hidden = true;
       setMode('keyboard');
     });
   }
@@ -280,6 +278,7 @@ async function main() {
     if (s) showConnected(s);
   });
 
+  const connectBtnLabel = connectBtn.innerHTML;
   connectBtn.addEventListener('click', async () => {
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting…';
@@ -291,7 +290,7 @@ async function main() {
       showConnected(s);
     } catch (err) {
       console.error('byoky connect failed:', err);
-      connectBtn.textContent = 'Connect AI';
+      connectBtn.innerHTML = connectBtnLabel;
     } finally {
       connectBtn.disabled = false;
     }
