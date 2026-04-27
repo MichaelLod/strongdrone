@@ -6,17 +6,19 @@ import { z } from 'zod';
 import type { ByokySession } from '@byoky/sdk';
 import type { Action, Agent, AgentContext } from '../types';
 
-const SYSTEM_PROMPT = `You are an autonomous quadcopter pilot in a simulated 3D world.
+const SYSTEM_PROMPT = `You are an autonomous strike quadcopter in a frontline simulation.
 
 Coordinates: +X east, +Z south, +Y up. Gravity points -Y.
-Each turn you receive the drone's current state and the next gate to fly through.
-Issue ONE tool call per turn. The action runs for 0.5 s of sim time, then you'll get a fresh observation.
+Mission: fly to each ground target (an enemy drone sitting on the ground) and strike it by getting within the hit radius. Targets sit at y≈0.4. Each target you "tag" by proximity counts as a hit.
+Each turn you receive the drone's state and the next ground target. Issue ONE tool call per turn; it runs for 0.5 s of sim time before you get a fresh observation.
 
 Strategy:
-- Use \`goto\` to fly directly toward the target gate.
-- Use \`velocity\` for fine corrections near a gate.
-- Stay above y=0.3 — touching the ground crashes you.
+- Use \`goto\` to vector toward the next target.
+- Approach with altitude (y≈1.5–2.5 in transit), then descend over the target so the 3D distance drops inside the hit radius.
+- Use \`velocity\` for fine corrections during the dive.
+- Do NOT descend below y=0.25 — touching the ground crashes you. A typical strike clears with the drone passing through y≈1.0–1.4 directly over the target.
 - Autopilot top speed is 5 m/s.
+- After a hit, climb back up before vectoring to the next target.
 - Do not narrate. Tool call only.`;
 
 const TOOLS = {
@@ -119,10 +121,10 @@ function buildUserMessage(ctx: AgentContext): string {
     ``,
     `Mission:`,
     target
-      ? `  next gate ${sc.currentGate + 1}/${sc.totalGates}: x=${f(target.x)} y=${f(target.y)} z=${f(target.z)} (touch within 0.8 m)`
-      : `  all gates cleared`,
+      ? `  next target ${sc.currentGate + 1}/${sc.totalGates}: x=${f(target.x)} y=${f(target.y)} z=${f(target.z)} (strike within 1.0 m, target is on the ground)`
+      : `  all targets neutralised`,
     upcoming.length
-      ? `  upcoming: ${upcoming.map((g) => `(${f(g.x)},${f(g.y)},${f(g.z)})`).join(' ')}`
+      ? `  upcoming targets: ${upcoming.map((g) => `(${f(g.x)},${f(g.y)},${f(g.z)})`).join(' ')}`
       : `  upcoming: (none)`,
     `  elapsed   ${f(sc.elapsedSimTime)} s`,
     ``,

@@ -1,10 +1,11 @@
 import type { Action } from './types';
 import type { ScenarioStatus } from './scenario';
+import type { PilotMode } from './sim';
 
 export type ActionLogEntry = { tick: number; action: Action };
 
 export type RunRecord = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   scenarioId: string;
   seed: number;
   actionLog: ActionLogEntry[];
@@ -13,6 +14,7 @@ export type RunRecord = {
   durationSimTime: number;
   startedAt: number;
   agentMode: 'keyboard' | 'llm';
+  pilotMode?: PilotMode;
   actionPhaseDuration?: number;
   physicsTimestep?: number;
   model?: string;
@@ -42,8 +44,12 @@ export function saveRun(run: RunRecord): void {
   }
 }
 
-export function getPersonalBest(scenarioId: string): number | null {
-  const raw = localStorage.getItem(PB_KEY_PREFIX + scenarioId);
+function pbKey(scenarioId: string, pilotMode: PilotMode): string {
+  return `${PB_KEY_PREFIX}${pilotMode}:${scenarioId}`;
+}
+
+export function getPersonalBest(scenarioId: string, pilotMode: PilotMode): number | null {
+  const raw = localStorage.getItem(pbKey(scenarioId, pilotMode));
   if (!raw) return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
@@ -51,12 +57,13 @@ export function getPersonalBest(scenarioId: string): number | null {
 
 export function maybeUpdatePB(
   scenarioId: string,
+  pilotMode: PilotMode,
   score: number
 ): { isNewBest: boolean; previousBest: number | null } {
-  const previousBest = getPersonalBest(scenarioId);
+  const previousBest = getPersonalBest(scenarioId, pilotMode);
   if (previousBest === null || score < previousBest) {
     try {
-      localStorage.setItem(PB_KEY_PREFIX + scenarioId, String(score));
+      localStorage.setItem(pbKey(scenarioId, pilotMode), String(score));
     } catch {}
     return { isNewBest: true, previousBest };
   }

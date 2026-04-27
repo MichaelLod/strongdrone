@@ -1,7 +1,6 @@
 import { Byoky, getProvider, getProviderIds, type ByokySession } from '@byoky/sdk';
 import { buildGates, createScene, disposeGates, updateGates, type GateRefs } from './scene';
-import { createSim } from './sim';
-import { createKeyboardAgent } from './agents/keyboard';
+import { createSim, type PilotMode } from './sim';
 import { createLlmAgent } from './agents/llm';
 import { createReplayAgent } from './agents/replay';
 import {
@@ -23,10 +22,11 @@ import {
 import type { Action, Agent, Observation } from './types';
 
 const PHYSICS_TIMESTEP = 1 / 60;
-const KEYBOARD_PHASE = 0.05;
 const LLM_PHASE = 0.5;
 const DEFAULT_MODEL = 'anthropic:claude-sonnet-4-6';
 const MODEL_KEY = 'strongdrone:model-v2';
+const PILOT_MODE_KEY = 'strongdrone:pilot-mode';
+const DEFAULT_PILOT_MODE: PilotMode = 'round';
 const RECENT_DECISIONS_MAX = 6;
 const SUPPORTED_PROVIDERS = new Set([
   'anthropic',
@@ -45,9 +45,9 @@ const SUPPORTED_PROVIDERS = new Set([
   'lm_studio',
 ]);
 
-type Mode = 'keyboard' | 'llm' | 'replay';
+type Mode = 'llm' | 'replay';
 
-const ONBOARDING_KEY = 'strongdrone:onboarding-seen';
+const ONBOARDING_KEY = 'strongdrone:onboarding-seen-v2';
 
 function setupOnboarding() {
   const el = document.getElementById('onboarding') as HTMLDivElement | null;
@@ -66,17 +66,20 @@ async function main() {
   let scenario: Scenario = createWaypointScenario(SCENARIOS[0]);
   let gates: GateRefs = buildGates(refs.scene, scenario.getGatePositions());
 
-  const keyboardAgent = createKeyboardAgent();
+  const hoverAgent: Agent = { decide: () => ({ type: 'hover' }) };
   let llmAgent: Agent | null = null;
   let session: ByokySession | null = null;
-  let mode: Mode = 'keyboard';
-  let preReplayMode: 'keyboard' | 'llm' = 'keyboard';
+  let mode: Mode = 'llm';
+  let pilotMode: PilotMode =
+    (localStorage.getItem(PILOT_MODE_KEY) as PilotMode | null) === 'live'
+      ? 'live'
+      : DEFAULT_PILOT_MODE;
   let selectedModel = localStorage.getItem(MODEL_KEY) || DEFAULT_MODEL;
 
   const sim = createSim(
-    keyboardAgent,
+    hoverAgent,
     () => ({ scenarioState: scenario.getState(), gates: scenario.getGatePositions() }),
-    { actionPhaseDuration: KEYBOARD_PHASE, physicsTimestep: PHYSICS_TIMESTEP }
+    { actionPhaseDuration: LLM_PHASE, physicsTimestep: PHYSICS_TIMESTEP, pilotMode }
   );
 
   // --- recording ---
@@ -85,8 +88,8 @@ async function main() {
   let runStartedAt = Date.now();
   let prevStatus: ScenarioStatus = 'running';
   let lastBanner: string | null = null;
-  let personalBest: number | null = getPersonalBest(scenario.getDefinition().id);
-  let runCount = countRunsFor(scenario.getDefinition().id);
+  let personalBest: number | null = getPersonalBest(scenario.getDefinition().id, pilotMode);
+  let runCount = countRunsFor(scenario.getDefinition().id, pilotMode);
   let lastShareableRun: RunRecord | null = null;
   let engaged = false;
 
@@ -108,7 +111,7 @@ async function main() {
   }
 
   function startRun() {
-    if (mode === 'replay') return;
+    if (mode === 'replay' || !llmAgent) return;
     resetRun();
     runStartedAt = Date.now();
     engaged = true;
@@ -125,8 +128,21 @@ async function main() {
     disposeGates(refs.scene, gates);
     scenario = createWaypointScenario(getScenarioById(id));
     gates = buildGates(refs.scene, scenario.getGatePositions());
-    personalBest = getPersonalBest(id);
-    runCount = countRunsFor(id);
+    personalBest = getPersonalBest(id, pilotMode);
+    runCount = countRunsFor(id, pilotMode);
+    resetRun();
+    lastShareableRun = null;
+    updateUi();
+  }
+
+  function setPilotMode(next: PilotMode) {
+    if (engaged) return;
+    pilotMode = next;
+    sim.setPilotMode(next);
+    try { localStorage.setItem(PILOT_MODE_KEY, next); } catch {}
+    const id = scenario.getDefinition().id;
+    personalBest = getPersonalBest(id, pilotMode);
+    runCount = countRunsFor(id, pilotMode);
     resetRun();
     lastShareableRun = null;
     updateUi();
@@ -141,20 +157,20 @@ async function main() {
       return;
     }
     const scenarioId = scenario.getDefinition().id;
-    const phase = mode === 'llm' ? LLM_PHASE : KEYBOARD_PHASE;
     const run: RunRecord = {
-      version: 2,
+      version: 3,
       scenarioId,
       seed: 0,
       actionLog: [...actionLog],
-      actionPhaseDuration: phase,
+      actionPhaseDuration: LLM_PHASE,
       physicsTimestep: PHYSICS_TIMESTEP,
       status: sc.status,
       score: sc.score,
       durationSimTime: sc.elapsedSimTime,
       startedAt: runStartedAt,
-      agentMode: mode,
-      model: mode === 'llm' ? selectedModel : undefined,
+      agentMode: 'llm',
+      pilotMode,
+      model: selectedModel,
     };
     saveRun(run);
     runCount += 1;
@@ -162,7 +178,7 @@ async function main() {
     engaged = false;
 
     if (sc.status === 'success' && sc.score !== null) {
-      const { isNewBest, previousBest } = maybeUpdatePB(scenarioId, sc.score);
+      const { isNewBest, previousBest } = maybeUpdatePB(scenarioId, pilotMode, sc.score);
       personalBest = isNewBest ? sc.score : previousBest;
       lastBanner = isNewBest
         ? `SUCCESS  ${sc.score.toFixed(2)}s   NEW BEST  press R to retry`
@@ -178,7 +194,6 @@ async function main() {
   // --- UI refs ---
   const connectBtn = document.getElementById('connect-ai') as HTMLButtonElement;
   const statusEl = document.getElementById('ai-status') as HTMLDivElement;
-  const toggleBtn = document.getElementById('toggle-pilot') as HTMLButtonElement;
   const shareBtn = document.getElementById('share-btn') as HTMLButtonElement;
   const picker = document.getElementById('scenario-picker') as HTMLSelectElement;
   const modelPicker = document.getElementById('model-picker') as HTMLSelectElement;
@@ -187,9 +202,10 @@ async function main() {
   const stopReplayBtn = document.getElementById('stop-replay') as HTMLButtonElement;
   const startBtn = document.getElementById('start-btn') as HTMLButtonElement;
   const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
-  const pilotSection = document.getElementById('pilot-section') as HTMLDivElement;
   const runSection = document.getElementById('run-section') as HTMLDivElement;
   const aiSection = document.getElementById('ai-section') as HTMLDivElement;
+  const modeRoundBtn = document.getElementById('mode-round') as HTMLButtonElement;
+  const modeLiveBtn = document.getElementById('mode-live') as HTMLButtonElement;
   const byoky = new Byoky();
 
   for (const def of SCENARIOS) {
@@ -213,22 +229,16 @@ async function main() {
     }
   });
 
-  function setMode(next: Mode) {
-    if (next === 'llm' && llmAgent) {
-      mode = 'llm';
-      sim.setAgent(llmAgent);
-      sim.setActionPhaseDuration(LLM_PHASE);
-    } else {
-      mode = 'keyboard';
-      sim.setAgent(keyboardAgent);
-      sim.setActionPhaseDuration(KEYBOARD_PHASE);
-    }
+  function setLlmMode() {
+    mode = 'llm';
+    sim.setAgent(llmAgent ?? hoverAgent);
+    sim.setActionPhaseDuration(LLM_PHASE);
+    sim.setPilotMode(pilotMode);
     resetRun();
     updateUi();
   }
 
   function startReplay(record: RunRecord) {
-    if (mode !== 'replay') preReplayMode = mode === 'llm' ? 'llm' : 'keyboard';
     if (record.scenarioId !== scenario.getDefinition().id) {
       switchScenario(record.scenarioId);
     } else {
@@ -237,6 +247,7 @@ async function main() {
     }
     sim.setAgent(createReplayAgent(record.actionLog));
     sim.setActionPhaseDuration(record.actionPhaseDuration ?? LLM_PHASE);
+    sim.setPilotMode(record.pilotMode ?? 'round');
     mode = 'replay';
     engaged = true;
     lastBanner = `REPLAY  ${record.scenarioId} · ${record.agentMode}${record.model ? ' · ' + record.model : ''} · ${record.durationSimTime.toFixed(2)}s`;
@@ -244,27 +255,24 @@ async function main() {
   }
 
   function stopReplay() {
-    setMode(preReplayMode);
+    setLlmMode();
   }
 
   function updateUi() {
-    if (mode === 'llm') {
-      modeBadge.className = 'mode-llm';
-      modeBadge.innerHTML = `<span class="live-dot"></span>AI LIVE`;
-    } else if (mode === 'replay') {
+    if (mode === 'replay') {
+      modeBadge.hidden = false;
       modeBadge.className = 'mode-replay';
       modeBadge.textContent = 'REPLAY';
+    } else if (llmAgent) {
+      modeBadge.hidden = false;
+      modeBadge.className = 'mode-llm';
+      modeBadge.innerHTML = `<span class="live-dot"></span>AI LIVE`;
     } else {
-      modeBadge.className = 'mode-keyboard';
-      modeBadge.textContent = 'KEYBOARD';
+      modeBadge.hidden = true;
     }
 
-    toggleBtn.textContent = mode === 'llm' ? 'Pilot: AI' : 'Pilot: Keyboard';
-    toggleBtn.classList.toggle('pilot-on', mode === 'llm');
-    toggleBtn.hidden = mode === 'replay' || !llmAgent;
-
     const isReplay = mode === 'replay';
-    startBtn.hidden = isReplay || engaged;
+    startBtn.hidden = isReplay || engaged || !llmAgent;
     stopBtn.hidden = isReplay || !engaged;
     stopReplayBtn.hidden = !isReplay;
     replayLastBtn.hidden = isReplay || engaged || !lastShareableRun;
@@ -274,11 +282,13 @@ async function main() {
       shareBtn.disabled = false;
     }
 
-    toggleBtn.disabled = engaged;
-
     aiSection.hidden = !llmAgent;
-    pilotSection.hidden = !!toggleBtn.hidden;
-    runSection.hidden = false;
+    runSection.hidden = !llmAgent && !isReplay && !lastShareableRun;
+
+    modeRoundBtn.classList.toggle('selected', pilotMode === 'round');
+    modeLiveBtn.classList.toggle('selected', pilotMode === 'live');
+    modeRoundBtn.disabled = engaged || isReplay;
+    modeLiveBtn.disabled = engaged || isReplay;
   }
 
   async function populateModels(s: ByokySession) {
@@ -357,14 +367,17 @@ async function main() {
     llmAgent = createLlmAgent({ session: s, providerId, modelId });
     connectBtn.hidden = true;
     statusEl.textContent = `${modelId} via ${getProvider(providerId)?.name ?? providerId}`;
-    setMode('llm');
+    setLlmMode();
     populateModels(s);
 
     s.onDisconnect(() => {
       session = null;
       llmAgent = null;
+      engaged = false;
       connectBtn.hidden = false;
-      setMode('keyboard');
+      sim.setAgent(hoverAgent);
+      resetRun();
+      updateUi();
     });
   }
 
@@ -390,9 +403,10 @@ async function main() {
     }
   });
 
-  toggleBtn.addEventListener('click', () => setMode(mode === 'llm' ? 'keyboard' : 'llm'));
   startBtn.addEventListener('click', startRun);
   stopBtn.addEventListener('click', stopRun);
+  modeRoundBtn.addEventListener('click', () => setPilotMode('round'));
+  modeLiveBtn.addEventListener('click', () => setPilotMode('live'));
 
   replayLastBtn.addEventListener('click', () => {
     if (lastShareableRun) startReplay(lastShareableRun);
@@ -437,13 +451,22 @@ async function main() {
     last = now;
     acc = Math.min(acc + dt, fixedDtMs);
 
-    if (engaged && prevStatus === 'running' && !stepping) {
-      stepping = true;
-      while (acc >= fixedDtMs) {
-        await sim.step();
-        acc -= fixedDtMs;
+    if (engaged && prevStatus === 'running') {
+      if (pilotMode === 'round') {
+        if (!stepping) {
+          stepping = true;
+          while (acc >= fixedDtMs) {
+            await sim.stepRound();
+            acc -= fixedDtMs;
+          }
+          stepping = false;
+        }
+      } else {
+        while (acc >= fixedDtMs) {
+          sim.stepLive();
+          acc -= fixedDtMs;
+        }
       }
-      stepping = false;
     } else {
       acc = 0;
     }
@@ -464,16 +487,22 @@ async function main() {
       obs.orientation.w
     );
 
+    const propStep = (dt / 1000) * 80;
+    for (const p of refs.propellers) {
+      p.rotateY(p.userData.spin * propStep);
+    }
+
     updateGates(gates, sc.currentGate, sc.status === 'running');
 
     refs.controls.target.set(obs.position.x, obs.position.y, obs.position.z);
     refs.controls.update();
 
-    hud.textContent = renderHud(obs, sim.getAction(), sc, mode, {
+    hud.textContent = renderHud(obs, sim.getAction(), sc, mode, pilotMode, {
       personalBest,
       runCount,
       lastBanner,
       recentDecisions,
+      thinking: sim.isDeciding(),
     });
 
     refs.renderer.render(refs.scene, refs.camera);
@@ -482,8 +511,8 @@ async function main() {
   requestAnimationFrame(loop);
 }
 
-function countRunsFor(scenarioId: string): number {
-  return loadRuns().filter((r) => r.scenarioId === scenarioId).length;
+function countRunsFor(scenarioId: string, pilotMode: PilotMode): number {
+  return loadRuns().filter((r) => r.scenarioId === scenarioId && (r.pilotMode ?? 'round') === pilotMode).length;
 }
 
 function parseModelKey(key: string): { providerId: string; modelId: string } {
@@ -497,6 +526,7 @@ type HudExtras = {
   runCount: number;
   lastBanner: string | null;
   recentDecisions: ActionLogEntry[];
+  thinking: boolean;
 };
 
 function renderHud(
@@ -504,6 +534,7 @@ function renderHud(
   action: Action,
   sc: ScenarioState,
   mode: Mode,
+  pilotMode: PilotMode,
   extras: HudExtras
 ): string {
   const f = (n: number) => n.toFixed(2).padStart(7);
@@ -515,10 +546,10 @@ function renderHud(
     lines.push('');
   }
   lines.push(
-    `time ${sc.elapsedSimTime.toFixed(2)}s   gate ${sc.currentGate}/${sc.totalGates}   d ${sc.distanceToGate.toFixed(2)}m`
+    `time ${sc.elapsedSimTime.toFixed(2)}s   target ${sc.currentGate}/${sc.totalGates}   d ${sc.distanceToGate.toFixed(2)}m`
   );
   const pbStr = extras.personalBest !== null ? `${extras.personalBest.toFixed(2)}s` : '—';
-  lines.push(`best ${pbStr}   runs ${extras.runCount}`);
+  lines.push(`best ${pbStr}   runs ${extras.runCount}   mode ${pilotMode === 'live' ? 'LIVE' : 'ROUND'}${extras.thinking ? ' · thinking…' : ''}`);
   lines.push('');
   lines.push(`pos  ${f(obs.position.x)} ${f(obs.position.y)} ${f(obs.position.z)}`);
   lines.push(`vel  ${f(obs.velocity.x)} ${f(obs.velocity.y)} ${f(obs.velocity.z)}`);
@@ -535,10 +566,8 @@ function renderHud(
   lines.push('');
   if (mode === 'replay') {
     lines.push('Replaying — drag to orbit, scroll to zoom');
-  } else if (mode === 'llm') {
-    lines.push('AI piloting · R reset · drag to orbit · scroll to zoom');
   } else {
-    lines.push('WASD/arrows  space/shift up/down  R reset');
+    lines.push('AI piloting · R reset · drag to orbit · scroll to zoom');
   }
   return lines.join('\n');
 }

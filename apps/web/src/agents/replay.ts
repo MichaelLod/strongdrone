@@ -8,17 +8,14 @@ export type ReplayAgent = Agent & {
 
 export function createReplayAgent(log: ActionLogEntry[]): ReplayAgent {
   let idx = 0;
+  let lastAction: Action = { type: 'hover' };
   return {
     decide(ctx: AgentContext): Action {
-      if (idx >= log.length) return { type: 'hover' };
-      const entry = log[idx];
-      idx++;
-      if (entry.tick !== ctx.observation.tick) {
-        console.warn(
-          `replay tick drift @${idx - 1}: log says ${entry.tick}, sim at ${ctx.observation.tick}`
-        );
+      while (idx < log.length && log[idx].tick <= ctx.observation.tick) {
+        lastAction = log[idx].action;
+        idx++;
       }
-      return entry.action;
+      return lastAction;
     },
     isExhausted: () => idx >= log.length,
     progress: () => ({ idx, total: log.length }),

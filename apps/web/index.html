@@ -65,6 +65,20 @@
         font-size: 11px;
       }
       .pilot-on { border-color: #ffd844 !important; color: #ffd844 !important; }
+      .mode-toggle { display: flex; gap: 4px; }
+      .mode-toggle button {
+        flex: 1;
+        text-align: center !important;
+        padding: 6px 8px !important;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .mode-toggle button.selected {
+        background: rgba(255, 79, 0, 0.18) !important;
+        border-color: rgba(255, 79, 0, 0.6) !important;
+        color: #ffd0b8 !important;
+      }
       #ai-panel #connect-ai {
         padding: 12px 16px;
         font-size: 14px;
@@ -90,7 +104,6 @@
         letter-spacing: 0.08em;
         min-width: 100px;
       }
-      .mode-keyboard { color: #6b7686; border-color: #6b7686; }
       .mode-llm { color: #ffd844; border-color: #ffd844; }
       .mode-replay { color: #66d9ff; border-color: #66d9ff; }
       .live-dot {
@@ -183,13 +196,13 @@
     <div id="onboarding" hidden>
       <div class="modal">
         <h2>Strongdrone</h2>
-        <p>Fly a drone through ring gates — manually, or hand the controls to an LLM pilot.</p>
+        <p>A competitive benchmark for LLM-piloted drones. Plug in any model from your byoky wallet and chase the high score.</p>
         <ul>
-          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to move, <kbd>Space</kbd>/<kbd>Shift</kbd> for up/down</li>
-          <li>Drag to orbit the camera, scroll to zoom</li>
-          <li><kbd>R</kbd> resets the run</li>
-          <li>Click <strong>Connect AI</strong> to hand the controls to any model in your byoky wallet — Claude, GPT, Gemini, and more</li>
-          <li>After a run, <strong>Replay Last</strong> plays it back deterministically</li>
+          <li><strong>Mission:</strong> the AI flies the quadcopter and dives onto enemy ground drones to score proximity strikes — every target down advances the run</li>
+          <li><strong>Connect AI</strong> — any model in your byoky wallet works (Claude, GPT, Gemini, Grok, Llama, Mistral, …)</li>
+          <li><strong>Pilot Mode</strong> — <em>Round</em> pauses physics while the LLM thinks (fair to reasoning models); <em>Live</em> never pauses (rewards low-latency tool-callers). Leaderboards are separated per mode.</li>
+          <li>Pick a scenario and hit <strong>Start Run</strong>. Personal best is tracked per (scenario × pilot mode).</li>
+          <li>Drag to orbit · scroll to zoom · <kbd>R</kbd> resets · <strong>Replay Last</strong> deterministically plays back any run</li>
         </ul>
         <button id="onboarding-close">Got it</button>
       </div>
@@ -199,7 +212,15 @@
     <div id="ai-panel">
       <button id="connect-ai">Connect AI</button>
 
-      <div id="mode-badge" class="mode-keyboard">KEYBOARD</div>
+      <div id="mode-badge" hidden></div>
+
+      <div class="panel-section">
+        <div class="panel-label">Pilot Mode</div>
+        <div class="mode-toggle">
+          <button id="mode-round" type="button" title="Physics pauses while the LLM thinks. Best for slow / reasoning models.">Round</button>
+          <button id="mode-live" type="button" title="Physics never pauses. LLM runs in parallel. Best for fast tool-calling models.">Live</button>
+        </div>
+      </div>
 
       <div class="panel-section">
         <div class="panel-label">Scenario</div>
@@ -212,12 +233,7 @@
         <div id="ai-status" class="status"></div>
       </div>
 
-      <div class="panel-section" id="pilot-section" hidden>
-        <div class="panel-label">Pilot</div>
-        <button id="toggle-pilot">Pilot: Keyboard</button>
-      </div>
-
-      <div class="panel-section" id="run-section">
+      <div class="panel-section" id="run-section" hidden>
         <div class="panel-label">Run</div>
         <button id="start-btn">Start Run</button>
         <button id="stop-btn" hidden>Stop</button>
