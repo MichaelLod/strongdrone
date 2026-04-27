@@ -31,7 +31,21 @@ const RECENT_DECISIONS_MAX = 6;
 
 type Mode = 'keyboard' | 'llm' | 'replay';
 
+const ONBOARDING_KEY = 'strongdrone:onboarding-seen';
+
+function setupOnboarding() {
+  const el = document.getElementById('onboarding') as HTMLDivElement | null;
+  const close = document.getElementById('onboarding-close') as HTMLButtonElement | null;
+  if (!el || !close) return;
+  if (!localStorage.getItem(ONBOARDING_KEY)) el.hidden = false;
+  close.addEventListener('click', () => {
+    el.hidden = true;
+    try { localStorage.setItem(ONBOARDING_KEY, '1'); } catch {}
+  });
+}
+
 async function main() {
+  setupOnboarding();
   const refs = createScene();
   let scenario: Scenario = createWaypointScenario(SCENARIOS[0]);
   let gates: GateRefs = buildGates(refs.scene, scenario.getGatePositions());
@@ -164,14 +178,16 @@ async function main() {
   });
 
   function setMode(next: Mode) {
-    mode = next;
-    if (mode === 'llm' && llmAgent) {
+    if (next === 'llm' && llmAgent) {
+      mode = 'llm';
       sim.setAgent(llmAgent);
       sim.setActionPhaseDuration(LLM_PHASE);
-    } else if (mode === 'keyboard') {
+    } else {
+      mode = 'keyboard';
       sim.setAgent(keyboardAgent);
       sim.setActionPhaseDuration(KEYBOARD_PHASE);
     }
+    resetRun();
     updateUi();
   }
 
@@ -191,7 +207,6 @@ async function main() {
   }
 
   function stopReplay() {
-    resetRun();
     setMode(preReplayMode);
   }
 

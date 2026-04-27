@@ -106,9 +106,95 @@
         0%, 100% { opacity: 1; }
         50% { opacity: 0.3; }
       }
+      #onboarding {
+        position: fixed; inset: 0;
+        background: rgba(8, 12, 16, 0.78);
+        backdrop-filter: blur(8px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 200;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #onboarding[hidden] { display: none; }
+      #onboarding .modal {
+        background: #14181f;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 26px 30px;
+        max-width: 440px;
+        color: #d8e0e8;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+      #onboarding h2 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      #onboarding p {
+        margin: 0 0 18px;
+        line-height: 1.5;
+        color: #a8b0b8;
+        font-size: 14px;
+      }
+      #onboarding ul {
+        margin: 0 0 22px;
+        padding: 0;
+        list-style: none;
+        font-size: 13px;
+        line-height: 1.7;
+        color: #b8c0c8;
+      }
+      #onboarding ul li {
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      }
+      #onboarding ul li:last-child { border-bottom: none; }
+      #onboarding kbd {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        color: #fff;
+        margin: 0 1px;
+      }
+      #onboarding-close {
+        background: rgba(255, 79, 0, 0.18);
+        border: 1px solid rgba(255, 79, 0, 0.5);
+        color: #ffd0b8;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: inherit;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+      }
+      #onboarding-close:hover {
+        background: rgba(255, 79, 0, 0.28);
+        border-color: rgba(255, 79, 0, 0.85);
+        color: #fff;
+      }
     </style>
   </head>
   <body>
+    <div id="onboarding" hidden>
+      <div class="modal">
+        <h2>Strongdrone</h2>
+        <p>Fly a drone through ring gates — manually, or hand the controls to an LLM pilot.</p>
+        <ul>
+          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to move, <kbd>Space</kbd>/<kbd>Shift</kbd> for up/down</li>
+          <li>Drag to orbit the camera, scroll to zoom</li>
+          <li><kbd>R</kbd> resets the run</li>
+          <li>Click <strong>Connect AI</strong> to let Claude take the controls (via byoky)</li>
+          <li>After a run, <strong>Replay Last</strong> plays it back deterministically</li>
+        </ul>
+        <button id="onboarding-close">Got it</button>
+      </div>
+    </div>
+
     <div id="hud">loading…</div>
     <div id="ai-panel">
       <button id="connect-ai">Connect AI</button>
