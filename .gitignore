@@ -6,3 +6,6 @@ dist
 .env.local
 target/
 apps/web/wasm/
+apps/web/public/assets/
+research/
+.vercel

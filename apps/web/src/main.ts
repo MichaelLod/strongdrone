@@ -1,5 +1,5 @@
 import { Byoky, getProvider, getProviderIds, type ByokySession } from '@byoky/sdk';
-import { buildGates, createScene, disposeGates, updateGates, type GateRefs } from './scene';
+import { buildGates, createScene, disposeGates, updateGates, type GateRefs } from './world';
 import { createSim, type PilotMode } from './sim';
 import { createLlmAgent } from './agents/llm';
 import { createReplayAgent } from './agents/replay';
@@ -63,6 +63,7 @@ function setupOnboarding() {
 async function main() {
   setupOnboarding();
   const refs = createScene();
+  (window as any).__refs = refs;
   let scenario: Scenario = createWaypointScenario(SCENARIOS[0]);
   let gates: GateRefs = buildGates(refs.scene, scenario.getGatePositions());
 
@@ -443,12 +444,15 @@ async function main() {
   const fixedDtMs = PHYSICS_TIMESTEP * 1000;
   let acc = 0;
   let last = performance.now();
+  let elapsedSec = 0;
   let stepping = false;
 
   async function loop(now: number) {
     requestAnimationFrame(loop);
+    try {
     const dt = Math.min(now - last, 100);
     last = now;
+    elapsedSec += dt / 1000;
     acc = Math.min(acc + dt, fixedDtMs);
 
     if (engaged && prevStatus === 'running') {
@@ -505,7 +509,12 @@ async function main() {
       thinking: sim.isDeciding(),
     });
 
-    refs.renderer.render(refs.scene, refs.camera);
+    refs.updateWorld(elapsedSec);
+    refs.render(dt / 1000);
+    } catch (err) {
+      console.error('[loop] error:', err);
+      throw err;
+    }
   }
 
   requestAnimationFrame(loop);
