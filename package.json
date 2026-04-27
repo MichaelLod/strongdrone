@@ -1,0 +1,12 @@
+{
+  "name": "strongdrone",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "build:wasm": "wasm-pack build crates/strongdrone-sim --target bundler --out-dir ../../apps/web/wasm",
+    "dev": "pnpm build:wasm && pnpm --filter web dev",
+    "build": "pnpm build:wasm && pnpm --filter web build",
+    "preview": "pnpm --filter web preview",
+    "typecheck": "pnpm build:wasm && pnpm --filter web typecheck"
+  }
+}

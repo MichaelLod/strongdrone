@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Strongdrone</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; overflow: hidden; }
+      canvas { display: block; }
+      #hud {
+        position: fixed; top: 12px; left: 12px;
+        color: #d8e0e8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px; line-height: 1.5;
+        background: rgba(8, 12, 16, 0.6);
+        padding: 10px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        pointer-events: none;
+        backdrop-filter: blur(6px);
+        white-space: pre;
+      }
+      #ai-panel {
+        position: fixed; top: 12px; right: 12px;
+        display: flex; flex-direction: column; gap: 14px;
+        align-items: stretch;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        width: 220px;
+      }
+      .panel-section {
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .panel-section[hidden] { display: none; }
+      .panel-label {
+        color: #5a6573;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 0 2px;
+      }
+      #ai-panel button, #ai-panel select {
+        background: rgba(8, 12, 16, 0.7);
+        color: #d8e0e8;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font: inherit;
+        cursor: pointer;
+        backdrop-filter: blur(6px);
+        text-align: left;
+      }
+      #ai-panel button:hover, #ai-panel select:hover {
+        background: rgba(20, 28, 36, 0.9);
+      }
+      #ai-panel button:disabled {
+        opacity: 0.5; cursor: default;
+      }
+      #ai-panel .status {
+        color: #8a95a3;
+        background: rgba(8, 12, 16, 0.6);
+        padding: 6px 10px;
+        border-radius: 4px;
+        backdrop-filter: blur(6px);
+        font-size: 11px;
+      }
+      .pilot-on { border-color: #ffd844 !important; color: #ffd844 !important; }
+      #mode-badge {
+        font-weight: 600;
+        text-align: center;
+        padding: 10px 14px;
+        border-radius: 6px;
+        border: 2px solid;
+        background: rgba(8, 12, 16, 0.7);
+        backdrop-filter: blur(6px);
+        letter-spacing: 0.08em;
+        min-width: 100px;
+      }
+      .mode-keyboard { color: #6b7686; border-color: #6b7686; }
+      .mode-llm { color: #ffd844; border-color: #ffd844; }
+      .mode-replay { color: #66d9ff; border-color: #66d9ff; }
+      .live-dot {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        margin-right: 6px;
+        vertical-align: 1px;
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <div id="ai-panel">
+      <div id="mode-badge" class="mode-keyboard">KEYBOARD</div>
+
+      <div class="panel-section">
+        <div class="panel-label">Scenario</div>
+        <select id="scenario-picker"></select>
+      </div>
+
+      <div class="panel-section" id="ai-section">
+        <div class="panel-label">AI Provider</div>
+        <button id="connect-ai">Connect AI</button>
+        <select id="model-picker" hidden></select>
+        <div id="ai-status" class="status" hidden></div>
+      </div>
+
+      <div class="panel-section" id="pilot-section" hidden>
+        <div class="panel-label">Pilot</div>
+        <button id="toggle-pilot">Pilot: Keyboard</button>
+      </div>
+
+      <div class="panel-section" id="run-section" hidden>
+        <div class="panel-label">Run</div>
+        <button id="replay-last" hidden>Replay Last Run</button>
+        <button id="stop-replay" hidden>Stop Replay</button>
+        <button id="share-btn" hidden>Copy Last Run</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
