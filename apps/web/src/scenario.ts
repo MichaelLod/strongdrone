@@ -100,6 +100,35 @@ export function getScenarioById(id: string): ScenarioDefinition {
   return SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0];
 }
 
+/** Procedurally generate a scenario with `count` hostile drones placed in a
+ *  randomized forward arc. Each call re-rolls the layout so two runs at the
+ *  same count are different — keeps repeat play interesting. */
+export function createCustomScenarioDef(count: number): ScenarioDefinition {
+  const n = Math.max(1, Math.min(12, Math.round(count)));
+  const baseAngle = Math.random() * Math.PI * 2;
+  const gates: Vec3[] = [];
+  // Spread targets in an arc; spacing widens with count to avoid overlap.
+  const arcSpan = Math.min(Math.PI * 1.4, n * (Math.PI / 5));
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0 : (i / (n - 1)) - 0.5; // -0.5..0.5
+    const angle = baseAngle + t * arcSpan + (Math.random() - 0.5) * 0.25;
+    const dist = 7 + Math.random() * 11;
+    gates.push({
+      x: Math.cos(angle) * dist,
+      y: 0.4,
+      z: Math.sin(angle) * dist,
+    });
+  }
+  return {
+    id: `custom-${n}`,
+    name: `Custom — ${n} drone${n === 1 ? '' : 's'}`,
+    description: `${n} hostile drone${n === 1 ? '' : 's'}`,
+    gates,
+    gateRadius: 1.0,
+    maxSimTime: 12 + n * 8,
+  };
+}
+
 export function createWaypointScenario(def: ScenarioDefinition): Scenario {
   const cfg: WaypointScenarioConfig = {
     gates: def.gates,

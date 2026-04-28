@@ -39,7 +39,7 @@
         text-transform: uppercase;
         padding: 0 2px;
       }
-      #ai-panel button, #ai-panel select {
+      #ai-panel button, #ai-panel select, #ai-panel input[type="number"] {
         background: rgba(8, 12, 16, 0.7);
         color: #d8e0e8;
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -49,6 +49,18 @@
         cursor: pointer;
         backdrop-filter: blur(6px);
         text-align: left;
+      }
+      #ai-panel input[type="number"] {
+        flex: 1;
+        text-align: center;
+        cursor: text;
+      }
+      .target-row { display: flex; gap: 4px; }
+      .target-row #target-shuffle {
+        padding: 6px 10px !important;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
       #ai-panel button:hover, #ai-panel select:hover {
         background: rgba(20, 28, 36, 0.9);
@@ -223,14 +235,22 @@
       </div>
 
       <div class="panel-section">
-        <div class="panel-label">Scenario</div>
-        <select id="scenario-picker"></select>
+        <div class="panel-label">Targets</div>
+        <div class="target-row">
+          <input id="target-count" type="number" min="1" max="12" value="3" />
+          <button id="target-shuffle" type="button" title="Re-randomise the target layout at the current count">Shuffle</button>
+        </div>
       </div>
 
       <div class="panel-section" id="ai-section" hidden>
-        <div class="panel-label">AI Provider</div>
+        <div class="panel-label">Player AI</div>
         <select id="model-picker"></select>
         <div id="ai-status" class="status"></div>
+      </div>
+
+      <div class="panel-section" id="target-ai-section" hidden>
+        <div class="panel-label">Target AI</div>
+        <select id="target-model-picker"></select>
       </div>
 
       <div class="panel-section" id="run-section" hidden>

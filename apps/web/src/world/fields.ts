@@ -16,14 +16,16 @@ const MAP_SIZE = 512;
 const SEED_GRID = 8; // 8×8 jittered grid → 64 patches across the terrain
 const SPAWN_RADIUS = 16;
 
-// Tint colors approximated from Hungarian/W. Pannonian satellite imagery.
-// FOREST is a forest-floor duff brown (dead leaves + pine needles), not the
-// green of the canopy — the canopy color comes from the trees themselves.
+// All field types now share the same pasture tint — the ground reads as one
+// continuous meadow. The Voronoi system still routes tree placement (FOREST
+// patches concentrate trees) but no longer paints the terrain. Per-pixel
+// noise drift in buildFieldTexture() gives the only colour variation.
+const PASTURE_TINT: [number, number, number] = [0.50, 0.62, 0.34];
 const TINT: Record<FieldType, [number, number, number]> = {
-  [FieldType.WHEAT]:   [0.83, 0.72, 0.47],
-  [FieldType.PASTURE]: [0.48, 0.65, 0.32],
-  [FieldType.PLOWED]:  [0.58, 0.43, 0.28],
-  [FieldType.FOREST]:  [0.34, 0.26, 0.16],
+  [FieldType.PASTURE]: PASTURE_TINT,
+  [FieldType.FOREST]:  PASTURE_TINT,
+  [FieldType.WHEAT]:   PASTURE_TINT,
+  [FieldType.PLOWED]:  PASTURE_TINT,
 };
 
 type Seed = { x: number; z: number; type: FieldType };
@@ -44,12 +46,11 @@ const seeds: Seed[] = [];
       // 0.7×cell jitter keeps boundaries chunky without crossing neighbors
       const x = cx + (rng() - 0.5) * cell * 0.7;
       const z = cz + (rng() - 0.5) * cell * 0.7;
+      // Binary forest mask. Open ground is uniformly pasture so we don't get
+      // painted-on field stripes; the visual interest comes from forest
+      // patches breaking up the meadow + the HDRI sky doing colour work.
       const r = rng();
-      let type: FieldType;
-      if      (r < 0.30) type = FieldType.FOREST;
-      else if (r < 0.55) type = FieldType.WHEAT;
-      else if (r < 0.83) type = FieldType.PASTURE;
-      else               type = FieldType.PLOWED;
+      const type: FieldType = r < 0.30 ? FieldType.FOREST : FieldType.PASTURE;
       seeds.push({ x, z, type });
     }
   }
@@ -71,7 +72,9 @@ export function fieldTypeAt(worldX: number, worldZ: number): FieldType {
   return seeds[best].type;
 }
 
-/** Bake the field tint colors into a 512² RGB texture for the terrain shader. */
+/** Bake the field tint colors into a 512² RGB texture for the terrain shader.
+ *  Adds slow FBM variation on top of the type tint so even within a single
+ *  pasture patch the colour drifts ±3 %, breaking up flat-uniform regions. */
 export function buildFieldTexture(): THREE.DataTexture {
   const data = new Uint8Array(MAP_SIZE * MAP_SIZE * 4);
   for (let y = 0; y < MAP_SIZE; y++) {
@@ -80,10 +83,14 @@ export function buildFieldTexture(): THREE.DataTexture {
       const wz = (y / MAP_SIZE - 0.5) * TERRAIN_SIZE;
       const type = fieldTypeAt(wx, wz);
       const tint = TINT[type];
+      // Two octaves of value noise, blended → smooth organic drift.
+      const n = 0.6 * vnoise(wx * 0.040, wz * 0.040)
+              + 0.4 * vnoise(wx * 0.115, wz * 0.115);
+      const drift = (n - 0.5) * 0.10;
       const idx = (y * MAP_SIZE + x) * 4;
-      data[idx]     = Math.round(tint[0] * 255);
-      data[idx + 1] = Math.round(tint[1] * 255);
-      data[idx + 2] = Math.round(tint[2] * 255);
+      data[idx]     = clamp255((tint[0] + drift) * 255);
+      data[idx + 1] = clamp255((tint[1] + drift * 0.85) * 255);
+      data[idx + 2] = clamp255((tint[2] + drift * 0.55) * 255);
       data[idx + 3] = 255;
     }
   }
@@ -95,4 +102,25 @@ export function buildFieldTexture(): THREE.DataTexture {
   tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
   return tex;
+}
+
+function clamp255(v: number): number {
+  return Math.max(0, Math.min(255, Math.round(v)));
+}
+
+function vnoise(x: number, y: number): number {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const u = fx * fx * (3 - 2 * fx);
+  const v = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix,     iy);
+  const b = hash2(ix + 1, iy);
+  const c = hash2(ix,     iy + 1);
+  const d = hash2(ix + 1, iy + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function hash2(x: number, y: number): number {
+  let h = x * 374761393 + y * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) >>> 0) / 0xffffffff;
 }

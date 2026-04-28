@@ -5,6 +5,8 @@ import { createSky } from './sky';
 import { setupLighting, setupPostProcessing } from './lighting';
 import { createTerrain } from './terrain';
 import { buildNature } from './nature-loader';
+import { buildGroundFog } from './ground-fog';
+import { buildBirds } from './birds';
 import { buildDroneMesh } from './meshes/drone';
 
 export type { GateRefs } from './gates';
@@ -23,18 +25,17 @@ export type SceneRefs = {
 
 export function createScene(): SceneRefs {
   const scene = new THREE.Scene();
-  const horizonColor = new THREE.Color(0xc8dff2);
-  scene.fog = new THREE.Fog(horizonColor, 80, 260);
-  // The PolyHaven HDRI is much brighter than the procedural sky we replaced,
-  // so its IBL contribution dominates Fresnel reflections at grazing camera
-  // angles (terrain looks bright at horizon, dark top-down). Damp it globally.
-  scene.environmentIntensity = 0.45;
+  // Soft warm-grey horizon haze — matches the HDRI's distant tone and hides
+  // mountain LOD pops. Will be reinforced by a height-based ground fog later.
+  const horizonColor = new THREE.Color(0xb6bfb8);
+  scene.fog = new THREE.Fog(horizonColor, 90, 320);
+  scene.environmentIntensity = 0.55;
 
   const camera = new THREE.PerspectiveCamera(
     60,
     window.innerWidth / window.innerHeight,
     0.1,
-    2000
+    3000
   );
   camera.position.set(5, 4, 7);
 
@@ -45,14 +46,11 @@ export function createScene(): SceneRefs {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
+  // Sun direction matches the visible sun baked into the HDRI so cast shadows
+  // line up with the captured lighting.
   const skyRefs = createSky(scene, {
-    // Sun positioned behind the default camera (camera looks toward -x,-z).
-    // Keeps the visible portion of the sky in the bluer "anti-solar" hemisphere.
-    elevation: 30,
-    azimuth: 135,
-    turbidity: 10,
-    rayleigh: 3,
-    cloudCoverage: 0.55,
+    elevation: 38,
+    azimuth: 215,
   });
 
   const lightingRefs = setupLighting(scene, renderer);
@@ -68,6 +66,8 @@ export function createScene(): SceneRefs {
   });
 
   const natureRefs = buildNature(scene);
+  const groundFog = buildGroundFog(scene);
+  const birds = buildBirds(scene);
 
   const { group: drone, propellers } = buildDroneMesh();
   scene.add(drone);
@@ -107,6 +107,8 @@ export function createScene(): SceneRefs {
   function updateWorld(elapsedSeconds: number) {
     skyRefs.update(elapsedSeconds);
     natureRefs.update(elapsedSeconds);
+    groundFog.update(elapsedSeconds);
+    birds.update(elapsedSeconds);
   }
 
   return {

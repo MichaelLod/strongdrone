@@ -3,8 +3,9 @@ import { buildGates, createScene, disposeGates, updateGates, updateGatesMotion, 
 import { createSim, type PilotMode } from './sim';
 import { createLlmAgent } from './agents/llm';
 import { createReplayAgent } from './agents/replay';
+import { createTargetLlmAgent, type TargetAgent, type TargetObs } from './agents/target-llm';
 import {
-  SCENARIOS,
+  createCustomScenarioDef,
   createWaypointScenario,
   getScenarioById,
   type Scenario,
@@ -25,6 +26,8 @@ const PHYSICS_TIMESTEP = 1 / 60;
 const LLM_PHASE = 0.5;
 const DEFAULT_MODEL = 'anthropic:claude-sonnet-4-6';
 const MODEL_KEY = 'strongdrone:model-v2';
+const TARGET_MODEL_KEY = 'strongdrone:target-model';
+const TARGET_DECISION_INTERVAL = 1.0; // sim seconds between target AI decisions
 const PILOT_MODE_KEY = 'strongdrone:pilot-mode';
 const DEFAULT_PILOT_MODE: PilotMode = 'round';
 const RECENT_DECISIONS_MAX = 6;
@@ -64,7 +67,11 @@ async function main() {
   setupOnboarding();
   const refs = createScene();
   (window as any).__refs = refs;
-  let scenario: Scenario = createWaypointScenario(SCENARIOS[0]);
+  const TARGET_COUNT_KEY = 'sd:targetCount';
+  const initialCount = clampCount(
+    Number(localStorage.getItem(TARGET_COUNT_KEY)) || 3,
+  );
+  let scenario: Scenario = createWaypointScenario(createCustomScenarioDef(initialCount));
   let gates: GateRefs = buildGates(refs.scene, scenario.getGatePositions());
   scenario.setLivePositions(() => gates.livePositions);
 
@@ -77,6 +84,9 @@ async function main() {
       ? 'live'
       : DEFAULT_PILOT_MODE;
   let selectedModel = localStorage.getItem(MODEL_KEY) || DEFAULT_MODEL;
+  let targetSelectedModel = localStorage.getItem(TARGET_MODEL_KEY) || '';
+  let targetAgent: TargetAgent | null = null;
+  let targetDecisionAccum = 0;
 
   const sim = createSim(
     hoverAgent,
@@ -128,13 +138,34 @@ async function main() {
 
   function switchScenario(id: string) {
     disposeGates(refs.scene, gates);
-    scenario = createWaypointScenario(getScenarioById(id));
+    // Honour both legacy preset IDs (recon-line, kill-box, …) and the new
+    // procedural custom-N pattern. Custom scenarios re-randomise on each
+    // call, which is intentional — the saved replay is for actions, not
+    // exact tree positions.
+    const m = id.match(/^custom-(\d+)$/);
+    const def = m ? createCustomScenarioDef(Number(m[1])) : getScenarioById(id);
+    scenario = createWaypointScenario(def);
     gates = buildGates(refs.scene, scenario.getGatePositions());
     scenario.setLivePositions(() => gates.livePositions);
     personalBest = getPersonalBest(id, pilotMode);
     runCount = countRunsFor(id, pilotMode);
     resetRun();
     lastShareableRun = null;
+    updateUi();
+  }
+
+  function applyTargetCount(count: number) {
+    const n = clampCount(count);
+    disposeGates(refs.scene, gates);
+    scenario = createWaypointScenario(createCustomScenarioDef(n));
+    gates = buildGates(refs.scene, scenario.getGatePositions());
+    scenario.setLivePositions(() => gates.livePositions);
+    const id = scenario.getDefinition().id;
+    personalBest = getPersonalBest(id, pilotMode);
+    runCount = countRunsFor(id, pilotMode);
+    resetRun();
+    lastShareableRun = null;
+    try { localStorage.setItem(TARGET_COUNT_KEY, String(n)); } catch {}
     updateUi();
   }
 
@@ -198,8 +229,11 @@ async function main() {
   const connectBtn = document.getElementById('connect-ai') as HTMLButtonElement;
   const statusEl = document.getElementById('ai-status') as HTMLDivElement;
   const shareBtn = document.getElementById('share-btn') as HTMLButtonElement;
-  const picker = document.getElementById('scenario-picker') as HTMLSelectElement;
+  const targetCountInput = document.getElementById('target-count') as HTMLInputElement;
+  const targetShuffleBtn = document.getElementById('target-shuffle') as HTMLButtonElement;
   const modelPicker = document.getElementById('model-picker') as HTMLSelectElement;
+  const targetModelPicker = document.getElementById('target-model-picker') as HTMLSelectElement;
+  const targetAiSection = document.getElementById('target-ai-section') as HTMLDivElement;
   const modeBadge = document.getElementById('mode-badge') as HTMLDivElement;
   const replayLastBtn = document.getElementById('replay-last') as HTMLButtonElement;
   const stopReplayBtn = document.getElementById('stop-replay') as HTMLButtonElement;
@@ -211,14 +245,17 @@ async function main() {
   const modeLiveBtn = document.getElementById('mode-live') as HTMLButtonElement;
   const byoky = new Byoky();
 
-  for (const def of SCENARIOS) {
-    const opt = document.createElement('option');
-    opt.value = def.id;
-    opt.textContent = `${def.name} — ${def.description}`;
-    picker.appendChild(opt);
-  }
-  picker.value = scenario.getDefinition().id;
-  picker.addEventListener('change', () => switchScenario(picker.value));
+  targetCountInput.value = String(initialCount);
+  targetCountInput.addEventListener('change', () => {
+    const n = clampCount(Number(targetCountInput.value));
+    targetCountInput.value = String(n);
+    if (engaged) return; // can't reshape mid-run
+    applyTargetCount(n);
+  });
+  targetShuffleBtn.addEventListener('click', () => {
+    if (engaged) return;
+    applyTargetCount(clampCount(Number(targetCountInput.value)));
+  });
 
   modelPicker.value = selectedModel;
   modelPicker.addEventListener('change', () => {
@@ -231,6 +268,50 @@ async function main() {
       if (mode === 'llm') sim.setAgent(llmAgent);
     }
   });
+
+  targetModelPicker.value = targetSelectedModel;
+  targetModelPicker.addEventListener('change', () => {
+    targetSelectedModel = targetModelPicker.value;
+    try { localStorage.setItem(TARGET_MODEL_KEY, targetSelectedModel); } catch {}
+    rebuildTargetAgent();
+  });
+
+  function rebuildTargetAgent() {
+    // Disconnect old agent and clear any cached velocity decisions so
+    // existing targets snap back to wander when switched off.
+    targetAgent = null;
+    for (const m of gates.motion) m.aiAction = null;
+    if (!session || !targetSelectedModel) return;
+    try {
+      const { providerId, modelId } = parseModelKey(targetSelectedModel);
+      targetAgent = createTargetLlmAgent({ session, providerId, modelId });
+    } catch (err) {
+      console.warn('Failed to build target AI:', err);
+    }
+  }
+
+  function dispatchTargetDecisions(playerObs: Observation) {
+    const agent = targetAgent;
+    if (!agent) return;
+    const elapsed = scenario.getState().elapsedSimTime;
+    for (let idx = 0; idx < gates.motion.length; idx++) {
+      if (gates.destroyState[idx]) continue;
+      const m = gates.motion[idx];
+      const obs: TargetObs = {
+        myPos: { x: m.current.x, y: m.current.y, z: m.current.z },
+        myVel: { x: m.velocity.x, y: m.velocity.y, z: m.velocity.z },
+        threatPos: playerObs.position,
+        threatVel: playerObs.velocity,
+        homePos: m.home,
+        elapsedTime: elapsed,
+      };
+      // Fire-and-forget — target keeps flying last vector while waiting.
+      agent.decide(obs).then((act) => {
+        if (gates.destroyState[idx]) return; // killed mid-flight
+        m.aiAction = act;
+      });
+    }
+  }
 
   function setLlmMode() {
     mode = 'llm';
@@ -358,10 +439,37 @@ async function main() {
     modelPicker.value = selectedModel;
     modelPicker.disabled = false;
 
+    // Populate the target-AI picker with the same options + a "wander only"
+    // sentinel. Targets default to no AI so cost stays low until user opts in.
+    targetModelPicker.innerHTML = '';
+    const wanderOpt = document.createElement('option');
+    wanderOpt.value = '';
+    wanderOpt.textContent = '— wander only —';
+    targetModelPicker.appendChild(wanderOpt);
+    for (const [pid, list] of byProvider) {
+      const group = document.createElement('optgroup');
+      group.label = list[0].providerName;
+      for (const e of list) {
+        const opt = document.createElement('option');
+        opt.value = `${pid}:${e.modelId}`;
+        opt.textContent = e.displayName;
+        group.appendChild(opt);
+      }
+      targetModelPicker.appendChild(group);
+    }
+    if (targetSelectedModel && !allKeys.includes(targetSelectedModel)) {
+      // saved key no longer available → fall back to wander
+      targetSelectedModel = '';
+      try { localStorage.setItem(TARGET_MODEL_KEY, ''); } catch {}
+    }
+    targetModelPicker.value = targetSelectedModel;
+    targetAiSection.hidden = false;
+
     const { providerId, modelId } = parseModelKey(selectedModel);
     llmAgent = createLlmAgent({ session: s, providerId, modelId });
     statusEl.textContent = `${modelId} via ${getProvider(providerId)?.name ?? providerId}`;
     if (mode === 'llm') sim.setAgent(llmAgent);
+    rebuildTargetAgent();
   }
 
   function showConnected(s: ByokySession) {
@@ -479,6 +587,20 @@ async function main() {
 
     const obs = sim.getObservation();
     updateGatesMotion(gates, dt / 1000, engaged && prevStatus === 'running');
+
+    // Target AI decisions — fire all targets in parallel every N seconds of
+    // sim time. Async, decisions arrive whenever the model finishes; in the
+    // meantime targets keep flying their last vector.
+    if (engaged && prevStatus === 'running' && targetAgent) {
+      targetDecisionAccum += dt / 1000;
+      if (targetDecisionAccum >= TARGET_DECISION_INTERVAL) {
+        targetDecisionAccum = 0;
+        dispatchTargetDecisions(obs);
+      }
+    } else {
+      targetDecisionAccum = 0;
+    }
+
     const sc = scenario.update(obs, PHYSICS_TIMESTEP);
 
     if (prevStatus === 'running' && sc.status !== 'running') {
@@ -525,6 +647,11 @@ async function main() {
 
 function countRunsFor(scenarioId: string, pilotMode: PilotMode): number {
   return loadRuns().filter((r) => r.scenarioId === scenarioId && (r.pilotMode ?? 'round') === pilotMode).length;
+}
+
+function clampCount(n: number): number {
+  if (!Number.isFinite(n)) return 3;
+  return Math.max(1, Math.min(12, Math.round(n)));
 }
 
 function parseModelKey(key: string): { providerId: string; modelId: string } {

@@ -20,7 +20,7 @@ import { UnrealBloomPass }   from 'three/addons/postprocessing/UnrealBloomPass.j
 import { ShaderPass }        from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass }        from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader }        from 'three/addons/shaders/FXAAShader.js';
-import { EXRLoader }         from 'three/addons/loaders/EXRLoader.js';
+import { RGBELoader }        from 'three/addons/loaders/RGBELoader.js';
 
 // ---------------------------------------------------------------------------
 // Public return types
@@ -89,38 +89,27 @@ export function setupLighting(
 
   // --- Tone mapping (must be set before IBL generation) -------------------
   renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-  // 0.4 keeps the Preetham sky from saturating to white while leaving room
-  // for sun-lit surfaces. Light intensities are scaled up to compensate.
-  renderer.toneMappingExposure = 0.4;
-  // Render targets inside EffectComposer use HalfFloat for HDR headroom.
-  // The OutputPass converts to sRGB. Do NOT set renderer.outputColorSpace
-  // to SRGBColorSpace here; OutputPass handles that.
+  // HDRI background is naturally calibrated (no analytic-sky dimming) so the
+  // exposure can sit closer to neutral without blowing the sky to white.
+  renderer.toneMappingExposure = 0.85;
 
-  // --- Ambient (very subtle fill — hemisphere does the heavy lifting) ------
-  // Old value 0.45 → under ACES exposure 0.85 the same look needs ~0.75.
-  // Start here and tweak after enabling post-processing.
-  const ambient = new THREE.AmbientLight(0xfff5e1, 1.3);
+  // --- Ambient (subtle fill — HDRI env map carries indirect now) -----------
+  const ambient = new THREE.AmbientLight(0xfff5e1, 0.55);
   scene.add(ambient);
 
-  // --- Hemisphere light (sky/ground bounce) --------------------------------
-  // Sky: soft blue-white to match the procedural sky horizon colour.
-  // Ground: muted olive-green matching the grass texture average albedo.
-  // Legacy-lights OFF: multiply old intensity (0.55) by π ≈ 1.73.
-  // Under ACES filmic the output is naturally compressed so a slightly higher
-  // hemisphere value (1.1) reads as pleasant indirect bounce.
+  // --- Hemisphere light (mostly redundant with HDRI but adds a touch of
+  // ground bounce that the env map underweights) ----------------------------
   const hemisphere = new THREE.HemisphereLight(
-    0xb8d8f5,  // sky color (existing)
-    0x4a6028,  // ground color (existing)
-    1.9,
+    0xb8d8f5,
+    0x5a6228,
+    0.7,
   );
   scene.add(hemisphere);
 
   // --- Directional sun ------------------------------------------------------
-  // Old intensity 1.6 → legacy-lights OFF equivalent ≈ 1.6 × π ≈ 5.0.
-  // With ACES + exposure 0.85 the visible brightness is very similar to the
-  // original linear unlit output. Keep 1.6 to start; raise to 5.0 if you
-  // want physically-calibrated footcandle levels (pair with exposure ~0.1).
-  const sun = new THREE.DirectionalLight(0xfff2d6, 2.7);
+  // Lower intensity now that HDRI does most of the work; keep it for crisp
+  // shadow casting only.
+  const sun = new THREE.DirectionalLight(0xfff2d6, 1.6);
   sun.position.set(20, 30, 12);   // same as original
   sun.castShadow             = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -190,19 +179,22 @@ export function setupLighting(
   refreshIBL();
 
   // --- Async HDRI upgrade --------------------------------------------------
-  // The procedural IBL above gives the scene a usable env map immediately.
-  // In the background we load a real PolyHaven HDRI and swap it in once ready
-  // so material reflections and diffuse GI come from a captured sky.
-  // The visible scene.background stays the procedural sky mesh — only the
-  // environment (used for shader sampling) is upgraded.
-  new EXRLoader()
-    .load('/assets/env/kloofendal_43d_clear_puresky_4k.exr', (hdrTex) => {
+  // PolyHaven HDRI drives BOTH lighting AND visible sky. PMREM-blurred copy
+  // goes to scene.environment (specular reflections + diffuse IBL); the raw
+  // equirect goes to scene.background so the captured sky + clouds + sun disc
+  // are visible directly. This replaces the Preetham sky shader and the FBM
+  // cloud plane in one step — the sky now matches the lighting it casts.
+  new RGBELoader()
+    .load('/assets/env/kloofendal_38d_partly_cloudy_puresky_2k.hdr', (hdrTex) => {
       hdrTex.mapping = THREE.EquirectangularReflectionMapping;
       const rt = pmremGen.fromEquirectangular(hdrTex);
       if (envMap) envMap.dispose();
       envMap = rt.texture;
       scene.environment = envMap;
-      hdrTex.dispose();
+      // Keep the equirect texture alive — it's now scene.background.
+      scene.background = hdrTex;
+      scene.backgroundIntensity = 1.0;
+      scene.backgroundBlurriness = 0.0;
     });
 
   function dispose() {
@@ -268,11 +260,64 @@ export function setupPostProcessing(
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
 
-  // Pass 2: Bloom (emissive highlights + sky overbright)
-  const bloom = new UnrealBloomPass(res, 0.35, 0.5, 0.85);
+  // Pass 2: Bloom (emissive highlights + sky overbright). Threshold raised
+  // for the new HDRI exposure (0.85) — previously 0.85 caught too much.
+  const bloom = new UnrealBloomPass(res, 0.28, 0.55, 1.05);
   composer.addPass(bloom);
 
-  // Pass 3: FXAA
+  // Pass 3: Stylized color grade + vignette + edge atmospheric tint.
+  // Pulls the scene toward a cohesive "stylized realism" palette and frames
+  // the view by softly darkening corners with a slight cool cast, the way
+  // a real lens does. Single shader pass — almost free.
+  const colorGrade = new ShaderPass({
+    uniforms: {
+      tDiffuse: { value: null },
+      uSaturation: { value: 0.92 },
+      uContrast: { value: 1.04 },
+      uLift: { value: 0.025 },
+      uTint: { value: new THREE.Color(1.03, 1.0, 0.94) },
+      uVignetteStrength: { value: 0.55 },
+      uVignetteRadius: { value: 0.95 },
+      uEdgeHaze: { value: new THREE.Color(0.90, 0.94, 0.98) },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tDiffuse;
+      uniform float uSaturation;
+      uniform float uContrast;
+      uniform float uLift;
+      uniform vec3  uTint;
+      uniform float uVignetteStrength;
+      uniform float uVignetteRadius;
+      uniform vec3  uEdgeHaze;
+      varying vec2  vUv;
+      void main() {
+        vec4 c = texture2D(tDiffuse, vUv);
+        // Lift shadows softly — pushes deep blacks into a foggy mid-grey
+        c.rgb = c.rgb + uLift * (1.0 - smoothstep(0.0, 0.25, c.rgb));
+        // Saturation against luminance
+        float lum = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+        c.rgb = mix(vec3(lum), c.rgb, uSaturation);
+        // Contrast around mid-grey
+        c.rgb = (c.rgb - 0.5) * uContrast + 0.5;
+        // Warm tint
+        c.rgb *= uTint;
+        // Vignette — radial darkening with subtle cool-haze tint at edges so
+        // corners look like atmospheric perspective rather than a black mask.
+        vec2 d = vUv - 0.5;
+        float r = length(d) * 1.4142;
+        float v = smoothstep(uVignetteRadius * 0.5, uVignetteRadius, r);
+        c.rgb = mix(c.rgb, c.rgb * uEdgeHaze * (1.0 - uVignetteStrength * 0.55), v);
+        gl_FragColor = c;
+      }
+    `,
+  });
+  composer.addPass(colorGrade);
+
+  // Pass 4: FXAA
   const fxaa = new ShaderPass(FXAAShader);
   const pixelRatio = renderer.getPixelRatio();
   fxaa.material.uniforms['resolution'].value.set(
@@ -281,7 +326,7 @@ export function setupPostProcessing(
   );
   composer.addPass(fxaa);
 
-  // Pass 4: OutputPass (tone mapping + sRGB) — MUST be last.
+  // Pass 5: OutputPass (tone mapping + sRGB) — MUST be last.
   const outputPass = new OutputPass();
   composer.addPass(outputPass);
 
@@ -316,72 +361,3 @@ export function setupPostProcessing(
   return { composer, bloom, fxaa, render, resize, dispose };
 }
 
-// ---------------------------------------------------------------------------
-// Sun shaft / god-ray stub
-// ---------------------------------------------------------------------------
-
-/**
- * Fake volumetric sun shafts using an additive translucent cone placed at the
- * sun position. This is the cheapest viable approach — no post-processing pass.
- *
- * Trade-offs vs a proper GodRaysPass (VolumetricLightScatteringPass):
- *   - Cone: ~0 GPU cost; works at any angle; looks good when sun is high.
- *   - GodRays post pass: ~2–4 ms; accurate occlusion; dies when sun is off-screen.
- *
- * The cone approach is preferred for this drone scene because the sun never
- * dips to the horizon (it's locked at position 20, 30, 12).
- *
- * Call addSunShafts() once and add the returned mesh to the scene.
- */
-export function addSunShafts(scene: THREE.Scene, sun: THREE.DirectionalLight): THREE.Mesh {
-  // Cone apex at sun position, opens downward toward scene centre.
-  // Cone is very tall so it visually intersects the sky dome.
-  const geo = new THREE.ConeGeometry(22, 55, 24, 1, true); // open cone
-  // Translate apex to top (cone apex = top vertex after rotation).
-  geo.translate(0, -27.5, 0);
-
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xfff5d8,
-    transparent: true,
-    opacity: 0.045,
-    side: THREE.FrontSide,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-
-  const shafts = new THREE.Mesh(geo, mat);
-  // Position apex at the sun direction (not exact position, but direction × far).
-  const dir = sun.position.clone().normalize().multiplyScalar(60);
-  shafts.position.copy(dir);
-  // Aim cone toward scene origin.
-  shafts.lookAt(0, 0, 0);
-  shafts.renderOrder = 1; // render after opaque geometry
-
-  scene.add(shafts);
-  return shafts;
-}
-
-// ---------------------------------------------------------------------------
-// Integration checklist (see notes.md for full details)
-// ---------------------------------------------------------------------------
-//
-// 1. Call setupLighting() BEFORE scene.add() of any PBR objects so
-//    scene.environment is set when materials are compiled.
-//
-// 2. Remove existing scene.add(new THREE.AmbientLight(...)) and
-//    scene.add(new THREE.HemisphereLight(...)) and scene.add(sun) from scene.ts.
-//    setupLighting() re-adds them.
-//
-// 3. In the main animation loop, replace:
-//      renderer.render(scene, camera);
-//    with:
-//      ppRefs.render(dt);
-//
-// 4. Move the window resize listener from createScene() to ppRefs.resize().
-//    Or keep both — renderer resize still needed for camera aspect.
-//
-// 5. Emissive intensity audit (see notes.md):
-//    - camLens emissiveIntensity 0.4  → raise to ~1.2 under ACES 0.85
-//    - antennaTip emissiveIntensity 0.5 → raise to ~1.5 for good bloom capture
-//    - beacon mat.emissive 0x553300 (current gate) → raise emissiveIntensity
-//      to 0.8 on active gate for visibility under tone mapping

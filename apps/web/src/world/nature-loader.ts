@@ -29,6 +29,10 @@ type PlacementSpec = {
    *  of spreading uniformly. Used for grass/wildflower patches so the pasture
    *  reads as real meadow clumps rather than uniform noise. */
   clusters?: { count: number; radius: number };
+  /** Vertex-shader wind sway amplitude in local source-mesh units. Top of the
+   *  mesh sways by `sway × scale`; bottom doesn't move. 0 = no sway (stumps,
+   *  dead wood, moss). Tall trees use ~0.06, ground cover ~0.025. */
+  sway?: number;
 };
 
 // Voronoi-partitioned farmland: trees only render inside FOREST patches,
@@ -38,47 +42,60 @@ type PlacementSpec = {
 const FOREST_ONLY = [FieldType.FOREST];
 const PASTURE_OR_WHEAT = [FieldType.PASTURE, FieldType.WHEAT];
 
+// Stylized-realism pass: lean on the HDRI sky + ground fog to do the visual
+// heavy lifting and keep nature placements intentionally sparse. One tree
+// species at varied scales reads as a real forest at distance — ground fog
+// hides the gaps. Total instance count was ~2400, now ~600.
 const PLACEMENTS: PlacementSpec[] = [
-  // Tall layer — same photoscanned saplings, scaled up so the forest gets a
-  // skyline silhouette without inventing fake geometry. Photoscans hold up at
-  // ~3-4× because the camera rarely sees them up close.
-  { slug: 'fir_sapling_medium',       count: 90,  minR: 6,  maxR: 95, scaleMin: 2.8, scaleMax: 3.8, castShadow: true,  optimized: true, fields: FOREST_ONLY },
-  { slug: 'pine_sapling_small',       count: 60,  minR: 6,  maxR: 95, scaleMin: 3.0, scaleMax: 4.2, castShadow: true,  optimized: true, fields: FOREST_ONLY },
-  // Sapling layer (knee-to-shoulder height).
-  { slug: 'fir_sapling_medium',       count: 160, minR: 4,  maxR: 95, scaleMin: 1.1, scaleMax: 1.9, castShadow: true,  optimized: true, fields: FOREST_ONLY },
-  { slug: 'fir_sapling',              count: 130, minR: 4,  maxR: 95, scaleMin: 0.9, scaleMax: 1.6, optimized: true,                     fields: FOREST_ONLY },
-  { slug: 'pine_sapling_small',       count: 80,  minR: 4,  maxR: 95, scaleMin: 1.0, scaleMax: 1.8, optimized: true,                     fields: FOREST_ONLY },
+  // Canopy layer (scaled-up firs) — sets the skyline silhouette.
+  { slug: 'fir_sapling_medium',       count: 110, minR: 6,  maxR: 95, scaleMin: 2.6, scaleMax: 3.8, castShadow: true,  optimized: true, fields: FOREST_ONLY, sway: 0.05 },
+  // Mid layer (saplings at native scale) for forest-floor depth.
+  { slug: 'fir_sapling_medium',       count: 90,  minR: 4,  maxR: 95, scaleMin: 1.0, scaleMax: 1.8, optimized: true,                     fields: FOREST_ONLY, sway: 0.04 },
+  { slug: 'pine_sapling_small',       count: 50,  minR: 4,  maxR: 95, scaleMin: 1.0, scaleMax: 1.8, optimized: true,                     fields: FOREST_ONLY, sway: 0.04 },
 
-  // Standing dead wood — vertical accents that aren't all green.
-  { slug: 'dead_tree_trunk',          count: 14,  minR: 6,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: FOREST_ONLY },
-  { slug: 'dead_tree_trunk_02',       count: 10,  minR: 6,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: FOREST_ONLY },
+  // Occasional accents — a few stumps + standing dead wood, that's it.
+  { slug: 'dead_tree_trunk',          count: 8,   minR: 6,  maxR: 95, scaleMin: 0.9, scaleMax: 1.3, fields: FOREST_ONLY },
+  { slug: 'tree_stump_01',            count: 8,   minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.2, fields: FOREST_ONLY },
 
-  // Understory mix.
-  { slug: 'fern_02',                  count: 180, minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY },
-  { slug: 'shrub_01',                 count: 70,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'shrub_02',                 count: 60,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'shrub_03',                 count: 60,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.3, fields: FOREST_ONLY },
-  { slug: 'shrub_04',                 count: 50,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'shrub_sorrel_01',          count: 60,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'nettle_plant',             count: 80,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'weed_plant_02',            count: 70,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'periwinkle_plant',         count: 50,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
+  // Forest floor — one fern species + moss patches.
+  { slug: 'fern_02',                  count: 110, minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY, sway: 0.025 },
+  { slug: 'moss_01',                  count: 50,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY },
 
-  // Forest floor detail.
-  { slug: 'moss_01',                  count: 70,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY },
-  { slug: 'tree_stump_01',            count: 14,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: FOREST_ONLY },
-  { slug: 'tree_stump_02',            count: 10,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: FOREST_ONLY },
-  { slug: 'dry_branches_medium_01',   count: 40,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'bark_debris_01',           count: 60,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.3, fields: FOREST_ONLY },
-
-  // Grass tufts and flowers cluster into wildflower patches across the open
-  // field patches. Counts × cluster sizes are tuned so each patch reads as a
-  // discrete clump (~10–25 instances per 2 m radius) instead of background fuzz.
-  { slug: 'grass_medium_01',          count: 240, minR: 8,  maxR: 95, scaleMin: 0.8, scaleMax: 1.2, fields: PASTURE_OR_WHEAT, clusters: { count: 14, radius: 2.5 } },
-  { slug: 'grass_medium_02',          count: 240, minR: 8,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: PASTURE_OR_WHEAT, clusters: { count: 14, radius: 2.5 } },
-  { slug: 'dandelion_01',             count: 160, minR: 8,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: [FieldType.PASTURE],         clusters: { count: 10, radius: 1.8 } },
-  { slug: 'celandine_01',             count: 120, minR: 8,  maxR: 95, scaleMin: 0.9, scaleMax: 1.3, fields: [FieldType.PASTURE],         clusters: { count: 8,  radius: 1.6 } },
+  // Pasture wildflower patches.
+  { slug: 'grass_medium_02',          count: 180, minR: 8,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: PASTURE_OR_WHEAT, clusters: { count: 12, radius: 2.5 }, sway: 0.03 },
+  { slug: 'dandelion_01',             count: 100, minR: 8,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: [FieldType.PASTURE],         clusters: { count: 8,  radius: 1.8 }, sway: 0.025 },
 ];
+
+// Shared time uniform — every wind-enabled material reads from this so we can
+// drive the whole forest with one assignment per frame.
+const windTime = { value: 0 };
+
+function applyWindSway(material: THREE.Material, sway: number): void {
+  if (sway <= 0) return;
+  if (!(material instanceof THREE.MeshStandardMaterial)) return;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uWindTime = windTime;
+    shader.uniforms.uSway = { value: sway };
+    shader.vertexShader = shader.vertexShader.replace(
+      'void main() {',
+      `uniform float uWindTime;
+       uniform float uSway;
+       void main() {`
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       float swayH = max(0.0, position.y - 0.05);
+       float phase = instanceMatrix[3].x * 0.13 + instanceMatrix[3].z * 0.17;
+       float wind = sin(uWindTime * 1.5 + phase) * 0.6
+                  + sin(uWindTime * 0.8 + phase * 1.7) * 0.4;
+       transformed.x += wind * swayH * uSway;
+       transformed.z += wind * swayH * uSway * 0.4;
+      `
+    );
+  };
+  material.needsUpdate = true;
+}
 
 export function buildNature(scene: THREE.Scene): NatureRefs {
   const loader = new GLTFLoader();
@@ -102,6 +119,11 @@ export function buildNature(scene: THREE.Scene): NatureRefs {
         }
         for (const mesh of sourceMeshes) {
           const im = makeInstanced(mesh, spec);
+          if (spec.sway) {
+            const m = im.material as THREE.Material | THREE.Material[];
+            if (Array.isArray(m)) m.forEach((mm) => applyWindSway(mm, spec.sway!));
+            else applyWindSway(m, spec.sway);
+          }
           scene.add(im);
           instancedMeshes.push(im);
         }
@@ -112,9 +134,8 @@ export function buildNature(scene: THREE.Scene): NatureRefs {
   }
 
   return {
-    update(_t: number) {
-      // Wind animation reserved for a follow-up — PolyHaven materials are
-      // standard PBR so vertex sway needs onBeforeCompile injection per mat.
+    update(t: number) {
+      windTime.value = t;
     },
     dispose() {
       for (const im of instancedMeshes) {
