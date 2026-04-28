@@ -1,5 +1,5 @@
 import { Byoky, getProvider, getProviderIds, type ByokySession } from '@byoky/sdk';
-import { buildGates, createScene, disposeGates, updateGates, type GateRefs } from './world';
+import { buildGates, createScene, disposeGates, updateGates, updateGatesMotion, type GateRefs } from './world';
 import { createSim, type PilotMode } from './sim';
 import { createLlmAgent } from './agents/llm';
 import { createReplayAgent } from './agents/replay';
@@ -66,6 +66,7 @@ async function main() {
   (window as any).__refs = refs;
   let scenario: Scenario = createWaypointScenario(SCENARIOS[0]);
   let gates: GateRefs = buildGates(refs.scene, scenario.getGatePositions());
+  scenario.setLivePositions(() => gates.livePositions);
 
   const hoverAgent: Agent = { decide: () => ({ type: 'hover' }) };
   let llmAgent: Agent | null = null;
@@ -129,6 +130,7 @@ async function main() {
     disposeGates(refs.scene, gates);
     scenario = createWaypointScenario(getScenarioById(id));
     gates = buildGates(refs.scene, scenario.getGatePositions());
+    scenario.setLivePositions(() => gates.livePositions);
     personalBest = getPersonalBest(id, pilotMode);
     runCount = countRunsFor(id, pilotMode);
     resetRun();
@@ -476,6 +478,7 @@ async function main() {
     }
 
     const obs = sim.getObservation();
+    updateGatesMotion(gates, dt / 1000, engaged && prevStatus === 'running');
     const sc = scenario.update(obs, PHYSICS_TIMESTEP);
 
     if (prevStatus === 'running' && sc.status !== 'running') {

@@ -121,7 +121,7 @@ function buildUserMessage(ctx: AgentContext): string {
     ``,
     `Mission:`,
     target
-      ? `  next target ${sc.currentGate + 1}/${sc.totalGates}: x=${f(target.x)} y=${f(target.y)} z=${f(target.z)} (strike within 1.0 m, target is on the ground)`
+      ? `  next target ${sc.currentGate + 1}/${sc.totalGates}: x=${f(target.x)} y=${f(target.y)} z=${f(target.z)} (hostile drone, hovering and drifting; strike within 1.0 m — coords update each turn)`
       : `  all targets neutralised`,
     upcoming.length
       ? `  upcoming targets: ${upcoming.map((g) => `(${f(g.x)},${f(g.y)},${f(g.z)})`).join(' ')}`

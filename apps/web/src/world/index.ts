@@ -8,7 +8,7 @@ import { buildNature } from './nature-loader';
 import { buildDroneMesh } from './meshes/drone';
 
 export type { GateRefs } from './gates';
-export { buildGates, disposeGates, updateGates } from './gates';
+export { buildGates, disposeGates, updateGates, updateGatesMotion } from './gates';
 
 export type SceneRefs = {
   scene: THREE.Scene;
@@ -52,7 +52,7 @@ export function createScene(): SceneRefs {
     azimuth: 135,
     turbidity: 10,
     rayleigh: 3,
-    cloudCoverage: 0.4,
+    cloudCoverage: 0.55,
   });
 
   const lightingRefs = setupLighting(scene, renderer);

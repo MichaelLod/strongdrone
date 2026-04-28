@@ -260,7 +260,9 @@ export function createSky(scene: THREE.Scene, options: SkyOptions = {}): SkyRefs
       uniforms: cu,
       vertexShader: cloudVertexShader,
       fragmentShader: cloudFragmentShader,
-      side: THREE.FrontSide,
+      // Plane is rotated so its normal points up, but the camera looks up at
+      // it from below — DoubleSide guarantees the underside is rendered.
+      side: THREE.DoubleSide,
       transparent: true,
       depthWrite: false,
     });

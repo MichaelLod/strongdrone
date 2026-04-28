@@ -25,6 +25,10 @@ type PlacementSpec = {
   /** Restrict instances to these field types. Placement retries up to 30 times
    *  to find a valid spot; instances that can't be placed are dropped. */
   fields?: FieldType[];
+  /** When set, instances bunch around N seed points (each `radius` wide) instead
+   *  of spreading uniformly. Used for grass/wildflower patches so the pasture
+   *  reads as real meadow clumps rather than uniform noise. */
+  clusters?: { count: number; radius: number };
 };
 
 // Voronoi-partitioned farmland: trees only render inside FOREST patches,
@@ -35,25 +39,45 @@ const FOREST_ONLY = [FieldType.FOREST];
 const PASTURE_OR_WHEAT = [FieldType.PASTURE, FieldType.WHEAT];
 
 const PLACEMENTS: PlacementSpec[] = [
-  // Trees fill the FOREST patches.
-  { slug: 'fir_sapling_medium',       count: 220, minR: 4,  maxR: 95, scaleMin: 1.1, scaleMax: 1.9, castShadow: true, optimized: true, fields: FOREST_ONLY },
-  { slug: 'fir_sapling',              count: 180, minR: 4,  maxR: 95, scaleMin: 0.9, scaleMax: 1.6, optimized: true, fields: FOREST_ONLY },
-  { slug: 'pine_sapling_small',       count: 100, minR: 4,  maxR: 95, scaleMin: 1.0, scaleMax: 1.8, optimized: true, fields: FOREST_ONLY },
+  // Tall layer — same photoscanned saplings, scaled up so the forest gets a
+  // skyline silhouette without inventing fake geometry. Photoscans hold up at
+  // ~3-4× because the camera rarely sees them up close.
+  { slug: 'fir_sapling_medium',       count: 90,  minR: 6,  maxR: 95, scaleMin: 2.8, scaleMax: 3.8, castShadow: true,  optimized: true, fields: FOREST_ONLY },
+  { slug: 'pine_sapling_small',       count: 60,  minR: 6,  maxR: 95, scaleMin: 3.0, scaleMax: 4.2, castShadow: true,  optimized: true, fields: FOREST_ONLY },
+  // Sapling layer (knee-to-shoulder height).
+  { slug: 'fir_sapling_medium',       count: 160, minR: 4,  maxR: 95, scaleMin: 1.1, scaleMax: 1.9, castShadow: true,  optimized: true, fields: FOREST_ONLY },
+  { slug: 'fir_sapling',              count: 130, minR: 4,  maxR: 95, scaleMin: 0.9, scaleMax: 1.6, optimized: true,                     fields: FOREST_ONLY },
+  { slug: 'pine_sapling_small',       count: 80,  minR: 4,  maxR: 95, scaleMin: 1.0, scaleMax: 1.8, optimized: true,                     fields: FOREST_ONLY },
 
-  // Forest understory.
-  { slug: 'fern_02',                  count: 220, minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY },
-  { slug: 'shrub_01',                 count: 90,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
-  { slug: 'shrub_03',                 count: 70,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.3, fields: FOREST_ONLY },
+  // Standing dead wood — vertical accents that aren't all green.
+  { slug: 'dead_tree_trunk',          count: 14,  minR: 6,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: FOREST_ONLY },
+  { slug: 'dead_tree_trunk_02',       count: 10,  minR: 6,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: FOREST_ONLY },
+
+  // Understory mix.
+  { slug: 'fern_02',                  count: 180, minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY },
+  { slug: 'shrub_01',                 count: 70,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
+  { slug: 'shrub_02',                 count: 60,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
+  { slug: 'shrub_03',                 count: 60,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.3, fields: FOREST_ONLY },
+  { slug: 'shrub_04',                 count: 50,  minR: 4,  maxR: 95, scaleMin: 0.6, scaleMax: 1.2, fields: FOREST_ONLY },
+  { slug: 'shrub_sorrel_01',          count: 60,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
+  { slug: 'nettle_plant',             count: 80,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
+  { slug: 'weed_plant_02',            count: 70,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
+  { slug: 'periwinkle_plant',         count: 50,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
+
+  // Forest floor detail.
+  { slug: 'moss_01',                  count: 70,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.4, fields: FOREST_ONLY },
   { slug: 'tree_stump_01',            count: 14,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: FOREST_ONLY },
+  { slug: 'tree_stump_02',            count: 10,  minR: 4,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: FOREST_ONLY },
   { slug: 'dry_branches_medium_01',   count: 40,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.2, fields: FOREST_ONLY },
   { slug: 'bark_debris_01',           count: 60,  minR: 4,  maxR: 95, scaleMin: 0.7, scaleMax: 1.3, fields: FOREST_ONLY },
 
-  // Grass tufts and flowers fill the open field patches (pasture + wheat).
-  { slug: 'grass_bermuda_01',         count: 600, minR: 2,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: PASTURE_OR_WHEAT },
-  { slug: 'grass_medium_01',          count: 220, minR: 3,  maxR: 95, scaleMin: 0.8, scaleMax: 1.2, fields: PASTURE_OR_WHEAT },
-  { slug: 'grass_medium_02',          count: 220, minR: 3,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: PASTURE_OR_WHEAT },
-  { slug: 'dandelion_01',             count: 220, minR: 3,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: [FieldType.PASTURE] },
-  { slug: 'celandine_01',             count: 160, minR: 3,  maxR: 95, scaleMin: 0.9, scaleMax: 1.3, fields: [FieldType.PASTURE] },
+  // Grass tufts and flowers cluster into wildflower patches across the open
+  // field patches. Counts × cluster sizes are tuned so each patch reads as a
+  // discrete clump (~10–25 instances per 2 m radius) instead of background fuzz.
+  { slug: 'grass_medium_01',          count: 240, minR: 8,  maxR: 95, scaleMin: 0.8, scaleMax: 1.2, fields: PASTURE_OR_WHEAT, clusters: { count: 14, radius: 2.5 } },
+  { slug: 'grass_medium_02',          count: 240, minR: 8,  maxR: 95, scaleMin: 0.8, scaleMax: 1.3, fields: PASTURE_OR_WHEAT, clusters: { count: 14, radius: 2.5 } },
+  { slug: 'dandelion_01',             count: 160, minR: 8,  maxR: 95, scaleMin: 0.9, scaleMax: 1.4, fields: [FieldType.PASTURE],         clusters: { count: 10, radius: 1.8 } },
+  { slug: 'celandine_01',             count: 120, minR: 8,  maxR: 95, scaleMin: 0.9, scaleMax: 1.3, fields: [FieldType.PASTURE],         clusters: { count: 8,  radius: 1.6 } },
 ];
 
 export function buildNature(scene: THREE.Scene): NatureRefs {
@@ -111,6 +135,22 @@ function makeInstanced(source: THREE.Mesh, spec: PlacementSpec): THREE.Instanced
   // PolyHaven plant geometry is centred at the trunk base, so identity Y
   // already sits flush on the terrain. Per-instance translation handled below.
 
+  // Pre-roll cluster centres in a valid field so each instance can pick one
+  // and sample a small offset, producing visible patches.
+  const clusterCenters: [number, number][] = [];
+  if (spec.clusters) {
+    let safety = 0;
+    while (clusterCenters.length < spec.clusters.count && safety++ < spec.clusters.count * 40) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = spec.minR + Math.pow(Math.random(), 0.6) * (spec.maxR - spec.minR);
+      const cx = Math.cos(angle) * r;
+      const cz = Math.sin(angle) * r;
+      if (!spec.fields || spec.fields.includes(fieldTypeAt(cx, cz))) {
+        clusterCenters.push([cx, cz]);
+      }
+    }
+  }
+
   const dummy = new THREE.Object3D();
   let placed = 0;
   for (let i = 0; i < spec.count; i++) {
@@ -119,10 +159,18 @@ function makeInstanced(source: THREE.Mesh, spec: PlacementSpec): THREE.Instanced
     // Reject-sample until we land in an allowed field. Up to 30 attempts so a
     // species with very few matching patches doesn't infinite-loop.
     for (let attempt = 0; attempt < 30; attempt++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = spec.minR + Math.pow(Math.random(), 0.6) * (spec.maxR - spec.minR);
-      x = Math.cos(angle) * r;
-      z = Math.sin(angle) * r;
+      if (clusterCenters.length > 0 && spec.clusters) {
+        const [cx, cz] = clusterCenters[(Math.random() * clusterCenters.length) | 0];
+        const r = Math.sqrt(Math.random()) * spec.clusters.radius;
+        const a = Math.random() * Math.PI * 2;
+        x = cx + Math.cos(a) * r;
+        z = cz + Math.sin(a) * r;
+      } else {
+        const angle = Math.random() * Math.PI * 2;
+        const r = spec.minR + Math.pow(Math.random(), 0.6) * (spec.maxR - spec.minR);
+        x = Math.cos(angle) * r;
+        z = Math.sin(angle) * r;
+      }
       if (!spec.fields || spec.fields.includes(fieldTypeAt(x, z))) {
         ok = true;
         break;

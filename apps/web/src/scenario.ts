@@ -16,6 +16,10 @@ export type Scenario = {
   update(obs: Observation, physicsTimestep: number): ScenarioState;
   getState(): ScenarioState;
   getGatePositions(): readonly Vec3[];
+  /** Wire a callback that returns the *live* (possibly moving) target positions.
+   *  Once set, getGatePositions and the distance check both read from it,
+   *  so the AI chases the actual target rather than its spawn point. */
+  setLivePositions(fn: () => readonly Vec3[]): void;
   getDefinition(): ScenarioDefinition;
 };
 
@@ -116,6 +120,8 @@ export function createWaypointScenario(def: ScenarioDefinition): Scenario {
   let state = initial();
   let startTick: number | null = null;
   let lastTick = -1;
+  let livePositionsFn: (() => readonly Vec3[]) | null = null;
+  const positions = (): readonly Vec3[] => livePositionsFn ? livePositionsFn() : cfg.gates;
 
   function reset() {
     state = initial();
@@ -140,7 +146,7 @@ export function createWaypointScenario(def: ScenarioDefinition): Scenario {
       return state;
     }
 
-    const target = cfg.gates[state.currentGate];
+    const target = positions()[state.currentGate];
     const dx = target.x - obs.position.x;
     const dy = target.y - obs.position.y;
     const dz = target.z - obs.position.z;
@@ -162,7 +168,8 @@ export function createWaypointScenario(def: ScenarioDefinition): Scenario {
     reset,
     update,
     getState: () => state,
-    getGatePositions: () => cfg.gates,
+    getGatePositions: () => positions(),
+    setLivePositions: (fn) => { livePositionsFn = fn; },
     getDefinition: () => def,
   };
 }

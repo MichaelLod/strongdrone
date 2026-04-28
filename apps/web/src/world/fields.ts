@@ -22,7 +22,7 @@ const SPAWN_RADIUS = 16;
 const TINT: Record<FieldType, [number, number, number]> = {
   [FieldType.WHEAT]:   [0.83, 0.72, 0.47],
   [FieldType.PASTURE]: [0.48, 0.65, 0.32],
-  [FieldType.PLOWED]:  [0.43, 0.31, 0.19],
+  [FieldType.PLOWED]:  [0.58, 0.43, 0.28],
   [FieldType.FOREST]:  [0.34, 0.26, 0.16],
 };
 
