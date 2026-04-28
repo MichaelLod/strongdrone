@@ -1,0 +1,8 @@
+node_modules
+target
+.git
+.vercel
+research
+apps/web/wasm
+apps/web/dist
+crates/*/target
